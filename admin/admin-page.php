@@ -481,6 +481,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 		<div id="ism-panel-orphans" class="ism-panel" hidden>
 			<div class="ism-card">
 				<h2><?php esc_html_e( 'Orphaned Files', 'image-size-manager' ); ?></h2>
+				<p class="ism-warning">
+					⚠️ <?php esc_html_e( 'Warning:', 'image-size-manager' ); ?></strong> <?php esc_html_e( 'This feature has not been thoroughly tested. Please run this in a test environment or use another plugin to clean up orphaned files.', 'image-size-manager' ); ?></p>
+				</p>
 				<p class="description"><?php esc_html_e( 'These image files exist in your uploads folder but have no matching entry in the WordPress media library. Scan first, then delete any you no longer need.', 'image-size-manager' ); ?></p>
 
 				<div class="ism-orphan-toolbar">

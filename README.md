@@ -1,6 +1,6 @@
 # RW Image Size Manager
 
-**Version:** 1.1.5  
+**Version:** 1.1.6  
 **Author:** Anthony Burkholder  
 **License:** GPL-2.0+  
 **Requires WordPress:** 6.0+  
@@ -56,6 +56,9 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 ---
 
 ## Changelog
+
+### 1.1.6 — 2026-03-14
+- **UI:** Added a warning notice to the Orphaned Files tab advising users to test in a staging environment before running deletions.
 
 ### 1.1.5 — 2026-03-14
 - **Infrastructure:** Plugin source moved to GitHub (`rosewoodmarketing/rw-image-size-manager`). WordPress sites running this plugin will now receive automatic update notifications through the standard WP Admin Updates screen when new releases are published.
