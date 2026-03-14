@@ -3,7 +3,7 @@
  * Plugin Name:       RW Image Size Manager
  * Plugin URI:        https://github.com/rosewoodmarketing/rw-image-size-manager
  * Description:       View, toggle, customize, and add image sizes. Control WooCommerce product image generation and auto-delete product images on trash deletion.
- * Version:           1.1.4
+ * Version:           1.1.5
  * Author:            Anthony Burkholder
  * License:           GPL-2.0+
  * Text Domain:       image-size-manager
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ISM_VERSION',     '1.1.4' );
+define( 'ISM_VERSION',     '1.1.5' );
 define( 'ISM_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'ISM_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'ISM_OPTION_KEY',  'ism_settings' );
