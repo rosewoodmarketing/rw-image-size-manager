@@ -1,0 +1,497 @@
+/* ============================================================
+   Image Size Manager – Admin Styles
+   ============================================================ */
+
+/* Wrap */
+.ism-wrap {
+	max-width: 960px;
+}
+
+/* ── Tabs ─────────────────────────────────────────────────── */
+.ism-tabs {
+	display: flex;
+	gap: 0;
+	margin: 16px 0 0;
+	border-bottom: 2px solid #c3c4c7;
+}
+
+.ism-tab {
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	margin-bottom: -2px;
+	padding: 10px 20px;
+	font-size: 14px;
+	font-weight: 500;
+	color: #50575e;
+	cursor: pointer;
+	transition: color 0.15s, border-color 0.15s;
+}
+
+.ism-tab:hover {
+	color: #1d2327;
+}
+
+.ism-tab.active {
+	color: #2271b1;
+	border-bottom-color: #2271b1;
+}
+
+/* ── Panels ───────────────────────────────────────────────── */
+.ism-panel {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-top: none;
+	padding: 24px;
+}
+
+.ism-panel h2 {
+	margin-top: 0;
+}
+
+/* ── Tables ───────────────────────────────────────────────── */
+.ism-sizes-table,
+.ism-custom-table,
+.ism-woo-sizes-table {
+	table-layout: auto;
+	margin-bottom: 12px;
+}
+
+.ism-sizes-table th,
+.ism-sizes-table td,
+.ism-custom-table th,
+.ism-custom-table td,
+.ism-woo-sizes-table th,
+.ism-woo-sizes-table td {
+	vertical-align: middle;
+	padding: 8px 12px;
+}
+
+.ism-sizes-table td:first-child,
+.ism-woo-sizes-table td:first-child {
+	text-align: center;
+	width: 64px;
+}
+
+.ism-row-disabled td {
+	opacity: 0.45;
+}
+
+.ism-dim-input {
+	width: 72px !important;
+}
+
+/* ── Toggle switch ────────────────────────────────────────── */
+.ism-toggle {
+	position: relative;
+	display: inline-block;
+	width: 40px;
+	height: 22px;
+	cursor: pointer;
+}
+
+.ism-toggle input {
+	opacity: 0;
+	width: 0;
+	height: 0;
+}
+
+.ism-toggle-slider {
+	position: absolute;
+	inset: 0;
+	background: #2271b1;
+	border-radius: 22px;
+	transition: background 0.2s;
+}
+
+.ism-toggle-slider::before {
+	content: '';
+	position: absolute;
+	left: 3px;
+	top: 3px;
+	width: 16px;
+	height: 16px;
+	background: #fff;
+	border-radius: 50%;
+	transition: transform 0.2s;
+	transform: translateX(18px);
+}
+
+/* Checked = disabled, so slider moves left and goes grey */
+.ism-toggle input:checked + .ism-toggle-slider {
+	background: #a7aaad;
+}
+
+.ism-toggle input:checked + .ism-toggle-slider::before {
+	transform: translateX(0);
+}
+
+/* ── Badges ───────────────────────────────────────────────── */
+.ism-badge {
+	display: inline-block;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	padding: 1px 6px;
+	border-radius: 3px;
+	margin-left: 6px;
+	vertical-align: middle;
+}
+
+.ism-badge-core   { background: #e0f0ff; color: #005f8d; }
+.ism-badge-custom { background: #e8f5e9; color: #2e7d32; }
+.ism-badge-theme  { background: #f3e5f5; color: #6a1b9a; }
+.ism-badge-woo    { background: #f0eaff; color: #7f54b3; }
+
+/* ── Cards (WooCommerce section) ──────────────────────────── */
+.ism-card {
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 20px 24px;
+	margin-bottom: 20px;
+}
+
+.ism-card h3 {
+	margin-top: 0;
+	font-size: 14px;
+}
+
+.ism-master-toggle {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-weight: 500;
+	margin: 12px 0;
+	cursor: pointer;
+}
+
+.ism-warning {
+	color: #8a1a00;
+	background: #fef8f0;
+	border-left: 4px solid #d63638;
+	padding: 8px 12px;
+	margin-top: 12px;
+}
+
+/* ── Custom sizes ─────────────────────────────────────────── */
+.ism-custom-row td {
+	padding: 6px 10px;
+}
+
+/* ── Submit row ───────────────────────────────────────────── */
+.ism-submit-row {
+	margin-top: 0;
+	padding: 16px 24px;
+	background: #f6f7f7;
+	border: 1px solid #c3c4c7;
+	border-top: none;
+}
+
+/* ── Notes ────────────────────────────────────────────────── */
+.ism-note {
+	color: #646970;
+	font-style: italic;
+	font-size: 12px;
+}
+
+/* ── Regeneration card ───────────────────────────────────── */
+.ism-regen-controls {
+	display: flex;
+	gap: 8px;
+	margin: 14px 0 0;
+}
+
+.ism-progress-wrap {
+	margin-top: 14px;
+}
+
+.ism-progress-bar-track {
+	background: #dcdcde;
+	border-radius: 4px;
+	height: 14px;
+	overflow: hidden;
+}
+
+.ism-progress-bar-fill {
+	height: 100%;
+	background: #2271b1;
+	border-radius: 4px;
+	transition: width 0.25s ease;
+	width: 0%;
+}
+
+.ism-progress-status {
+	margin: 6px 0 0;
+	font-size: 12px;
+	color: #50575e;
+}
+
+.ism-regen-log {
+	max-height: 180px;
+	overflow-y: auto;
+	margin: 10px 0 0;
+	padding: 8px 10px;
+	background: #f6f7f7;
+	border: 1px solid #c3c4c7;
+	border-radius: 3px;
+	list-style: none;
+	font-size: 12px;
+	line-height: 1.7;
+}
+
+.ism-regen-log-ok::before {
+	content: '✓ ';
+	color: #2e7d32;
+	font-weight: 700;
+}
+
+.ism-regen-log-error::before {
+	content: '✗ ';
+	color: #cc1818;
+	font-weight: 700;
+}
+
+.ism-regen-resume-bar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 14px 0 0;
+	padding: 10px 14px;
+	background: #fff8e1;
+	border: 1px solid #f5c518;
+	border-radius: 4px;
+	flex-wrap: wrap;
+}
+
+.ism-regen-resume-info {
+	flex: 1;
+	font-size: 13px;
+	color: #5a4a00;
+	font-style: italic;
+}
+.ism-panel-cpts {
+	padding: 0;
+}
+
+.ism-cpt-layout {
+	display: flex;
+	min-height: 480px;
+}
+
+.ism-cpt-sidebar {
+	width: 190px;
+	flex-shrink: 0;
+	border-right: 1px solid #c3c4c7;
+	padding: 8px 0;
+	background: #f6f7f7;
+}
+
+.ism-cpt-nav-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	text-align: left;
+	padding: 9px 16px;
+	background: none;
+	border: none;
+	border-left: 3px solid transparent;
+	cursor: pointer;
+	font-size: 13px;
+	color: #1d2327;
+	word-break: break-word;
+}
+
+.ism-cpt-nav-item:hover {
+	background: #ecedf0;
+}
+
+.ism-cpt-nav-item.active {
+	background: #fff;
+	border-left-color: #2271b1;
+	color: #2271b1;
+	font-weight: 500;
+}
+
+.ism-cpt-panels {
+	flex: 1;
+	padding: 24px;
+	min-width: 0;
+}
+
+.ism-cpt-panel h2 {
+	margin-top: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+}
+
+/* ── CPT sizes table ──────────────────────────────────────── */
+.ism-cpt-sizes-table {
+	margin-bottom: 0;
+}
+
+.ism-cpt-sizes-table th,
+.ism-cpt-sizes-table td {
+	vertical-align: middle;
+	padding: 7px 10px;
+}
+
+.ism-cpt-sizes-table td:first-child {
+	width: 48px;
+	text-align: center;
+}
+
+.ism-cpt-sizes-table tr.ism-row-disabled td {
+	opacity: 0.45;
+}
+
+.ism-cpt-sizes-table tr.ism-row-disabled input[type="checkbox"] {
+	cursor: not-allowed;
+}
+/* ── Media Log ─────────────────────────────────────────────────────────── */
+.ism-log-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+}
+.ism-log-toolbar .regular-text {
+        min-width: 260px;
+}
+.ism-log-summary {
+        margin-left: auto;
+        color: #666;
+        font-size: 13px;
+}
+.ism-log-loading {
+        color: #666;
+        font-style: italic;
+}
+.ism-log-entry {
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        margin-bottom: 10px;
+        overflow: hidden;
+        background: #fff;
+}
+.ism-log-entry-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 14px;
+        background: #f9f9f9;
+        border-bottom: 1px solid #e0e0e0;
+}
+.ism-log-thumb {
+        width: 56px;
+        height: 56px;
+        object-fit: cover;
+        border-radius: 3px;
+        border: 1px solid #ddd;
+        flex-shrink: 0;
+        background: #eee;
+}
+.ism-log-thumb-missing {
+        width: 56px;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        border: 1px solid #ddd;
+        background: #eee;
+        flex-shrink: 0;
+}
+.ism-log-thumb-missing::after {
+        content: '?';
+        color: #bbb;
+        font-size: 24px;
+}
+.ism-log-entry-meta {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+}
+.ism-log-entry-meta strong {
+        font-size: 14px;
+        word-break: break-all;
+}
+.ism-log-dim {
+        color: #888;
+        font-size: 12px;
+}
+.ism-log-dim a {
+        color: #888;
+}
+.ism-log-missing {
+        color: #c00;
+}
+.ism-log-sizes {
+        padding: 12px 14px;
+}
+.ism-log-sizes-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+}
+.ism-log-sizes-table th,
+.ism-log-sizes-table td {
+        padding: 5px 8px;
+        border-bottom: 1px solid #f0f0f0;
+        text-align: left;
+}
+.ism-log-sizes-table th {
+        background: #f5f5f5;
+        font-weight: 600;
+        color: #444;
+}
+.ism-log-ok td:last-child {
+        color: #2a7c2a;
+}
+.ism-log-miss td:last-child {
+        color: #c00;
+}
+.ism-log-pagination {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 14px;
+}
+.ism-log-page-info {
+        font-size: 13px;
+        color: #555;
+}
+
+/* ── Orphaned Files ─────────────────────────────────────────────────────── */
+.ism-orphan-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+}
+.ism-orphan-status {
+        font-size: 13px;
+        color: #555;
+        font-style: italic;
+}
+.ism-orphan-summary {
+        margin-bottom: 10px;
+        font-size: 13px;
+        color: #444;
+}
+.ism-orphan-actions {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 10px;
+        font-size: 13px;
+}
+.ism-orphan-table code {
+        font-size: 12px;
+        word-break: break-all;
+}

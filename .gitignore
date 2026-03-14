@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# IDE / editor
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Composer
+vendor/
+
+# Build output
+dist/
+build/
