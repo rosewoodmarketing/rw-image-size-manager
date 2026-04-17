@@ -466,32 +466,130 @@
         font-size: 13px;
         color: #555;
 }
+/* ── Bulk image tools cards ─────────────────────────────── */
+.ism-bulk-card {
+	padding: 16px 18px;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	background: #fff;
+}
+.ism-bulk-card h4 {
+	margin: 0 0 6px;
+	font-size: 14px;
+}
 
-/* ── Orphaned Files ─────────────────────────────────────────────────────── */
-.ism-orphan-toolbar {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 16px;
+/* ── Advanced tab – visually de-emphasized ──────────────── */
+.ism-tab-advanced {
+	margin-left: auto;
+	color: #646970;
 }
-.ism-orphan-status {
-        font-size: 13px;
-        color: #555;
-        font-style: italic;
+.ism-tab-advanced:hover,
+.ism-tab-advanced.active {
+	color: #1d2327;
 }
-.ism-orphan-summary {
-        margin-bottom: 10px;
-        font-size: 13px;
-        color: #444;
+
+/* ── Image size usage scanner ───────────────────────────── */
+.ism-scan-sources {
+	margin: 10px 0 14px 18px;
+	list-style: disc;
 }
-.ism-orphan-actions {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        margin-bottom: 10px;
-        font-size: 13px;
+.ism-scan-sources li {
+	margin-bottom: 5px;
+	font-size: 13px;
+	color: #3c434a;
 }
-.ism-orphan-table code {
-        font-size: 12px;
-        word-break: break-all;
+.ism-scan-caveat {
+	margin-top: 10px;
+	color: #646970;
+	font-size: 12px;
 }
+.ism-scan-summary {
+	margin-bottom: 10px;
+	font-weight: 500;
+}
+/* Results table */
+.ism-scan-results-table {
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 13px;
+}
+.ism-scan-results-table th {
+	background: #f6f7f7;
+	padding: 8px 10px;
+	text-align: left;
+	font-weight: 600;
+	border-bottom: 1px solid #c3c4c7;
+}
+.ism-scan-results-table td {
+	padding: 7px 10px;
+	border-bottom: 1px solid #f0f0f1;
+	vertical-align: middle;
+}
+.ism-scan-results-table tr.ism-row-unused td {
+	color: #666;
+}
+/* Status badges */
+.ism-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .4px;
+}
+.ism-badge-core    { background: #d1e8d1; color: #1d7e2d; }
+.ism-badge-in-use  { background: #d6e9f8; color: #1565c0; }
+.ism-badge-plugin  { background: #ede8f5; color: #5e35b1; }
+.ism-badge-unused  { background: #fef3cd; color: #996800; }
+.ism-scan-plugin-note {
+	font-size: 11px;
+	color: #646970;
+	margin-left: 4px;
+}
+
+/* ── Usage expand button & detail rows ──────────────────── */
+.ism-usage-expand {
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	color: #2271b1;
+	font-size: 13px;
+	line-height: inherit;
+}
+.ism-usage-expand:hover strong {
+	text-decoration: underline;
+}
+.ism-expand-arrow {
+	font-size: 9px;
+	margin-left: 2px;
+	vertical-align: middle;
+}
+.ism-usage-detail-row > td {
+	background: #f6f7f7;
+	border-bottom: 1px solid #e0e0e0 !important;
+}
+.ism-usage-detail-cell {
+	padding: 8px 16px 10px 42px !important;
+}
+.ism-usage-list {
+	margin: 0;
+	list-style: disc;
+}
+.ism-usage-list li {
+	margin: 4px 0;
+	font-size: 13px;
+}
+.ism-source-label {
+	display: inline-block;
+	padding: 1px 6px;
+	border-radius: 3px;
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .3px;
+	margin-left: 5px;
+}
+.ism-source-elementor { background: #ede8f5; color: #5e35b1; }
+.ism-source-content   { background: #d6e9f8; color: #1565c0; }

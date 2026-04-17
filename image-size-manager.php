@@ -3,7 +3,7 @@
  * Plugin Name:       RW Image Size Manager
  * Plugin URI:        https://github.com/rosewoodmarketing/rw-image-size-manager
  * Description:       View, toggle, customize, and add image sizes. Control WooCommerce product image generation and auto-delete product images on trash deletion.
- * Version:           1.1.6
+ * Version:           1.2.0
  * Author:            Anthony Burkholder
  * License:           GPL-2.0+
  * Text Domain:       image-size-manager
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ISM_VERSION',     '1.1.6' );
+define( 'ISM_VERSION',     '1.2.0' );
 define( 'ISM_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'ISM_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'ISM_OPTION_KEY',  'ism_settings' );
@@ -26,6 +26,7 @@ define( 'ISM_GITHUB_USER', 'rosewoodmarketing' );
 define( 'ISM_GITHUB_REPO', 'rw-image-size-manager' );
 
 require_once ISM_PLUGIN_DIR . 'includes/class-ism-github-updater.php';
+require_once ISM_PLUGIN_DIR . 'includes/ajax-handlers.php';
 
 if ( is_admin() ) {
 	new ISM_GitHub_Updater( __FILE__, ISM_GITHUB_USER, ISM_GITHUB_REPO );
@@ -59,9 +60,14 @@ add_action( 'wp_ajax_ism_regen_batch', 'ism_ajax_regen_batch' );
 // AJAX: media log
 add_action( 'wp_ajax_ism_media_log', 'ism_ajax_media_log' );
 
-// AJAX: orphaned files scanner + delete
-add_action( 'wp_ajax_ism_orphan_scan',   'ism_ajax_orphan_scan' );
-add_action( 'wp_ajax_ism_orphan_delete', 'ism_ajax_orphan_delete' );
+// AJAX: bulk resize existing images to max-upload dims + remove -scaled files
+add_action( 'wp_ajax_ism_bulk_resize_init',   'ism_ajax_bulk_resize_init' );
+add_action( 'wp_ajax_ism_bulk_resize_batch',  'ism_ajax_bulk_resize_batch' );
+add_action( 'wp_ajax_ism_descale_init',       'ism_ajax_descale_init' );
+add_action( 'wp_ajax_ism_descale_batch',      'ism_ajax_descale_batch' );
+
+// AJAX: image size usage scanner
+add_action( 'wp_ajax_ism_size_usage_scan',    'ism_ajax_size_usage_scan' );
 
 // Resize uploaded image originals to a configured maximum & suppress WP's own -scaled logic
 add_filter( 'wp_handle_upload',         'ism_handle_upload_resize', 10, 2 );
@@ -577,122 +583,7 @@ function ism_regen_attachment( int $attachment_id, string $cpt_key ) {
 	return [ 'deleted' => $files_deleted ];
 }
 
-/**
- * AJAX: initialise a regeneration run for a given CPT.
- * Collects all attachment IDs, stores them in a transient, returns the total.
- */
-function ism_ajax_regen_init(): void {
-	check_ajax_referer( 'ism_regen', 'nonce' );
-	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json_error( 'Unauthorized', 403 );
-	}
 
-	$cpt_key = sanitize_key( $_POST['cpt_key'] ?? '' );
-	if ( ! $cpt_key ) {
-		wp_send_json_error( 'Missing cpt_key' );
-	}
-
-	$transient_key = 'ism_regen_' . $cpt_key . '_' . get_current_user_id();
-	$force_restart = ! empty( $_POST['force_restart'] );
-
-	// If a previous run is saved and the caller just wants to resume, return it.
-	if ( ! $force_restart ) {
-		$existing = get_transient( $transient_key );
-		if ( is_array( $existing ) && ! empty( $existing['ids'] ) ) {
-			// Refresh TTL so it doesn't expire mid-resume.
-			set_transient( $transient_key, $existing, DAY_IN_SECONDS );
-			wp_send_json_success( [
-				'transient_key' => $transient_key,
-				'total'         => count( $existing['ids'] ),
-				'batch_size'    => 3,
-				'resumed'       => true,
-			] );
-		}
-	}
-
-	$ids = ism_collect_cpt_attachment_ids( $cpt_key );
-
-	set_transient( $transient_key, [ 'ids' => $ids ], DAY_IN_SECONDS );
-
-	wp_send_json_success( [
-		'transient_key' => $transient_key,
-		'total'         => count( $ids ),
-		'batch_size'    => 3,
-		'resumed'       => false,
-	] );
-}
-
-/**
- * AJAX: process one batch of attachments.
- */
-function ism_ajax_regen_batch(): void {
-	check_ajax_referer( 'ism_regen', 'nonce' );
-	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json_error( 'Unauthorized', 403 );
-	}
-
-	// Give each batch request its own generous time limit.
-	@set_time_limit( 120 ); // phpcs:ignore
-
-	$transient_key = sanitize_key( $_POST['transient_key'] ?? '' );
-	$offset        = max( 0, (int) ( $_POST['offset'] ?? 0 ) );
-	$batch_size    = 3;
-	$cpt_key       = sanitize_key( $_POST['cpt_key'] ?? '' );
-
-	$saved = get_transient( $transient_key );
-
-	// Support both old (plain array) and new ({ids, ...}) transient formats.
-	if ( is_array( $saved ) && isset( $saved['ids'] ) ) {
-		$ids = $saved['ids'];
-	} elseif ( is_array( $saved ) ) {
-		$ids = $saved;
-	} else {
-		wp_send_json_error( 'Session expired — please restart to regenerate.' );
-	}
-
-	$batch             = array_slice( $ids, $offset, $batch_size );
-	$messages          = [];
-	$batch_deleted     = 0;
-
-	foreach ( $batch as $att_id ) {
-		$att_id   = (int) $att_id;
-		$filename = basename( get_attached_file( $att_id ) ?: "ID {$att_id}" );
-		$result   = ism_regen_attachment( $att_id, $cpt_key );
-
-		if ( is_wp_error( $result ) ) {
-			$messages[] = [ 'type' => 'error', 'text' => "{$filename}: " . $result->get_error_message() ];
-		} else {
-			$n             = (int) ( $result['deleted'] ?? 0 );
-			$batch_deleted += $n;
-			$suffix        = $n > 0 ? " ({$n} file" . ( $n === 1 ? '' : 's' ) . " deleted)" : '';
-			$messages[]    = [ 'type' => 'ok', 'text' => $filename . $suffix ];
-		}
-	}
-
-	$new_offset    = $offset + count( $batch );
-	$done          = $new_offset >= count( $ids );
-
-	// Accumulate total deleted count across all batches in the transient.
-	$total_deleted = (int) ( is_array( $saved ) ? ( $saved['total_deleted'] ?? 0 ) : 0 ) + $batch_deleted;
-
-	if ( $done ) {
-		delete_transient( $transient_key );
-	} else {
-		// Refresh TTL on every batch so a long run never expires mid-way.
-		set_transient( $transient_key, [ 'ids' => $ids, 'total_deleted' => $total_deleted ], DAY_IN_SECONDS );
-	}
-
-	wp_send_json_success( [
-		'messages'      => $messages,
-		'offset'        => $new_offset,
-		'total'         => count( $ids ),
-		'done'          => $done,
-		'total_deleted' => $total_deleted,
-	] );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin menu
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ism_add_admin_menu(): void {
@@ -729,10 +620,13 @@ function ism_enqueue_assets( string $hook ): void {
 		true
 	);
 	wp_localize_script( 'ism-admin', 'ismData', [
-		'ajaxUrl'       => admin_url( 'admin-ajax.php' ),
-		'nonce'         => wp_create_nonce( 'ism_regen' ),
-		'mediaLogNonce' => wp_create_nonce( 'ism_media_log' ),
-		'orphanNonce'   => wp_create_nonce( 'ism_orphan' ),
+		'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
+		'nonce'          => wp_create_nonce( 'ism_regen' ),
+		'mediaLogNonce'  => wp_create_nonce( 'ism_media_log' ),
+		'bulkResizeNonce'=> wp_create_nonce( 'ism_bulk_resize' ),
+		'maxUploadWidth' => (int) ism_get_settings()['max_upload_width'],
+		'maxUploadHeight'=> (int) ism_get_settings()['max_upload_height'],
+		'sizeUsageNonce' => wp_create_nonce( 'ism_bulk_resize' ),
 	] );
 }
 
@@ -755,9 +649,15 @@ function ism_register_settings(): void {
  * has its own max-upload dimensions configured.
  */
 function ism_big_image_threshold( int $threshold ): int|false {
-	$s = ism_get_settings();
-	if ( (int) $s['max_upload_width'] > 0 || (int) $s['max_upload_height'] > 0 ) {
-		return false; // disable WP's own scaling — we do it ourselves
+	$s     = ism_get_settings();
+	$max_w = (int) $s['max_upload_width'];
+	$max_h = (int) $s['max_upload_height'];
+	$limit = max( $max_w, $max_h );
+
+	// Suppress WP's -scaled only when the configured max is below the 2560px threshold.
+	// If the max is ≥ 2560 (or unset), let WordPress handle its own scaling.
+	if ( $limit > 0 && $limit < 2560 ) {
+		return false;
 	}
 	return $threshold;
 }
@@ -901,275 +801,6 @@ function ism_handle_save(): void {
 	exit;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin page render
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Media Log AJAX handler
-// ─────────────────────────────────────────────────────────────────────────────
-
-function ism_ajax_media_log(): void {
-	check_ajax_referer( 'ism_media_log', 'nonce' );
-
-	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json_error( 'Forbidden', 403 );
-	}
-
-	$page    = max( 1, (int) ( $_POST['page'] ?? 1 ) );
-	$search  = sanitize_text_field( $_POST['search'] ?? '' );
-	$per     = 20;
-	$offset  = ( $page - 1 ) * $per;
-
-	$args = [
-		'post_type'      => 'attachment',
-		'post_mime_type' => 'image',
-		'post_status'    => 'inherit',
-		'posts_per_page' => $per,
-		'offset'         => $offset,
-		'orderby'        => 'date',
-		'order'          => 'DESC',
-		'fields'         => 'ids',
-	];
-
-	if ( $search !== '' ) {
-		$args['s'] = $search;
-	}
-
-	$count_args              = $args;
-	$count_args['posts_per_page'] = -1;
-	$count_args['offset']    = 0;
-	$total_ids               = get_posts( $count_args );
-	$total                   = count( $total_ids );
-
-	$ids = get_posts( $args );
-
-	$upload_dir = wp_upload_dir();
-	$base_dir   = trailingslashit( $upload_dir['basedir'] );
-
-	$items = [];
-	foreach ( $ids as $id ) {
-		$meta     = wp_get_attachment_metadata( $id );
-		$file     = get_attached_file( $id );
-		$rel_file = str_replace( $base_dir, '', $file );
-
-		$parent_id    = (int) get_post_field( 'post_parent', $id );
-		$parent_title = $parent_id ? get_the_title( $parent_id ) : '';
-		$parent_url   = $parent_id ? get_edit_post_link( $parent_id, 'raw' ) : '';
-
-		$thumb_url = wp_get_attachment_image_url( $id, 'thumbnail' ) ?: '';
-
-		$sizes_list = [];
-		if ( ! empty( $meta['sizes'] ) ) {
-			// Build directory of the original file
-			$file_dir = $file ? trailingslashit( dirname( $file ) ) : '';
-			foreach ( $meta['sizes'] as $size_key => $size_data ) {
-				$size_path   = $file_dir . $size_data['file'];
-				$exists      = $file_dir && file_exists( $size_path );
-				$filesize    = $exists ? size_format( filesize( $size_path ) ) : '—';
-				$sizes_list[] = [
-					'key'      => $size_key,
-					'file'     => $size_data['file'],
-					'width'    => $size_data['width'],
-					'height'   => $size_data['height'],
-					'mime'     => $size_data['mime-type'] ?? '',
-					'exists'   => $exists,
-					'filesize' => $filesize,
-				];
-			}
-		}
-
-		// Original file info
-		$orig_exists   = $file && file_exists( $file );
-		$orig_filesize = $orig_exists ? size_format( filesize( $file ) ) : '—';
-
-		$items[] = [
-			'id'           => $id,
-			'filename'     => basename( $file ),
-			'rel_path'     => $rel_file,
-			'thumb_url'    => $thumb_url,
-			'orig_width'   => $meta['width'] ?? 0,
-			'orig_height'  => $meta['height'] ?? 0,
-			'orig_filesize'=> $orig_filesize,
-			'orig_exists'  => $orig_exists,
-			'parent_title' => $parent_title,
-			'parent_url'   => $parent_url,
-			'date'         => get_the_date( 'Y-m-d', $id ),
-			'edit_url'     => get_edit_post_link( $id, 'raw' ),
-			'sizes'        => $sizes_list,
-		];
-	}
-
-	wp_send_json_success( [
-		'items'      => $items,
-		'total'      => $total,
-		'page'       => $page,
-		'per'        => $per,
-		'total_pages'=> (int) ceil( $total / $per ),
-	] );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Orphaned files helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Build an absolute-path set of every file WordPress knows about in the uploads dir:
- * originals, generated sizes, and -scaled backups.
- */
-function ism_build_known_files_set(): array {
-	$known = [];
-
-	$ids = get_posts( [
-		'post_type'      => 'attachment',
-		'post_status'    => 'inherit',
-		'posts_per_page' => -1,
-		'fields'         => 'ids',
-	] );
-
-	foreach ( $ids as $id ) {
-		$file = get_attached_file( $id );
-		if ( $file ) {
-			$known[ $file ] = true;
-			$dir = trailingslashit( dirname( $file ) );
-		} else {
-			$dir = '';
-		}
-
-		$meta = wp_get_attachment_metadata( $id );
-
-		if ( ! empty( $meta['sizes'] ) && $dir ) {
-			foreach ( $meta['sizes'] as $size_data ) {
-				if ( ! empty( $size_data['file'] ) ) {
-					$known[ $dir . $size_data['file'] ] = true;
-				}
-			}
-		}
-
-		// -scaled original backup
-		if ( ! empty( $meta['original_image'] ) && $dir ) {
-			$known[ $dir . $meta['original_image'] ] = true;
-		}
-	}
-
-	return $known;
-}
-
-/**
- * AJAX: scan uploads directory and return files not registered in the media library.
- */
-function ism_ajax_orphan_scan(): void {
-	check_ajax_referer( 'ism_orphan', 'nonce' );
-
-	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json_error( 'Forbidden', 403 );
-	}
-
-	$upload_dir = wp_upload_dir();
-	$base_dir   = trailingslashit( $upload_dir['basedir'] );
-
-	$known = ism_build_known_files_set();
-
-	$image_exts = [ 'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'heic', 'bmp', 'tiff', 'tif', 'svg' ];
-
-	$orphans   = [];
-	$total_bytes = 0;
-
-	try {
-		$iterator = new RecursiveIteratorIterator(
-			new RecursiveDirectoryIterator( $base_dir, FilesystemIterator::SKIP_DOTS )
-		);
-	} catch ( Exception $e ) {
-		wp_send_json_error( 'Cannot read uploads directory.' );
-	}
-
-	foreach ( $iterator as $file_obj ) {
-		if ( ! $file_obj->isFile() ) {
-			continue;
-		}
-		$ext = strtolower( $file_obj->getExtension() );
-		if ( ! in_array( $ext, $image_exts, true ) ) {
-			continue;
-		}
-
-		$abs_path = $file_obj->getPathname();
-		if ( isset( $known[ $abs_path ] ) ) {
-			continue;
-		}
-
-		$bytes        = $file_obj->getSize();
-		$total_bytes += $bytes;
-		$orphans[]    = [
-			'rel_path' => str_replace( $base_dir, '', $abs_path ),
-			'filename' => $file_obj->getFilename(),
-			'filesize' => size_format( $bytes ),
-			'raw_size' => $bytes,
-			'modified' => gmdate( 'Y-m-d', $file_obj->getMTime() ),
-		];
-	}
-
-	usort( $orphans, fn( $a, $b ) => strcmp( $a['rel_path'], $b['rel_path'] ) );
-
-	wp_send_json_success( [
-		'orphans'    => $orphans,
-		'count'      => count( $orphans ),
-		'total_size' => size_format( $total_bytes ),
-	] );
-}
-
-/**
- * AJAX: permanently delete a list of orphaned files (relative paths within uploads).
- */
-function ism_ajax_orphan_delete(): void {
-	check_ajax_referer( 'ism_orphan', 'nonce' );
-
-	if ( ! current_user_can( 'manage_options' ) ) {
-		wp_send_json_error( 'Forbidden', 403 );
-	}
-
-	$rel_paths  = (array) ( $_POST['paths'] ?? [] );
-	$upload_dir = wp_upload_dir();
-	$base_dir   = realpath( $upload_dir['basedir'] );
-
-	// Re-build known set for a final safety check.
-	$known = ism_build_known_files_set();
-
-	$deleted = [];
-	$errors  = [];
-
-	foreach ( $rel_paths as $rel ) {
-		$rel = ltrim( sanitize_text_field( $rel ), '/' );
-
-		// Block path traversal
-		if ( strpos( $rel, '..' ) !== false ) {
-			$errors[] = $rel;
-			continue;
-		}
-
-		$abs     = $upload_dir['basedir'] . '/' . $rel;
-		$real    = realpath( $abs );
-
-		// Must resolve to a real path inside the uploads dir
-		if ( ! $real || strpos( $real, $base_dir ) !== 0 ) {
-			$errors[] = $rel;
-			continue;
-		}
-
-		// Must not be a registered attachment file
-		if ( isset( $known[ $real ] ) ) {
-			$errors[] = $rel;
-			continue;
-		}
-
-		if ( @unlink( $real ) ) {
-			$deleted[] = $rel;
-		} else {
-			$errors[] = $rel;
-		}
-	}
-
-	wp_send_json_success( [ 'deleted' => $deleted, 'errors' => $errors ] );
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin page render

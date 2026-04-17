@@ -476,130 +476,318 @@
                 $btn.text( ( isOpen ? 'Show ' : 'Hide ' ) + count + ' variation' + ( count === 1 ? '' : 's' ) );
         } );
 
-        // ── Orphaned Files ────────────────────────────────────────────────────
-        function orphanUpdateDeleteBtn() {
-                var checked = $( '#ism-orphan-tbody input[type="checkbox"]:checked' ).length;
-                $( '#ism-orphan-delete-btn' ).prop( 'disabled', checked === 0 );
-        }
+	// ── Bulk batch runner (shared by both bulk tools) ────────────────────────
+	function bulkRunBatch( cfg ) {
+		// cfg = { ajaxUrl, nonce, batchAction, transientKey, offset, total,
+		//         $bar, $status, $log, $cancelBtn, abortFlag, onDone }
+		if ( cfg.abortFlag() ) {
+			cfg.$status.text( 'Cancelled at ' + cfg.offset + ' / ' + cfg.total + '.' );
+			cfg.$cancelBtn.hide();
+			return;
+		}
 
-        $( '#ism-orphan-scan-btn' ).on( 'click', function () {
-                var $btn    = $( this );
-                var $status = $( '.ism-orphan-status' );
+		$.post( ismData.ajaxUrl, {
+			action:        cfg.batchAction,
+			nonce:         ismData.bulkResizeNonce,
+			transient_key: cfg.transientKey,
+			offset:        cfg.offset,
+		}, function ( res ) {
+			if ( ! res.success ) {
+				cfg.$status.text( 'Error: ' + ( res.data || 'unknown' ) );
+				cfg.$cancelBtn.hide();
+				return;
+			}
+			var d   = res.data;
+			var pct = d.total > 0 ? Math.round( ( d.offset / d.total ) * 100 ) : 100;
 
-                $btn.prop( 'disabled', true );
-                $status.text( 'Scanning\u2026' );
-                $( '#ism-orphan-results' ).hide();
-                $( '#ism-orphan-tbody' ).html( '' );
-                $( '#ism-orphan-select-all' ).prop( 'checked', false );
+			cfg.$bar.css( 'width', pct + '%' );
+			cfg.$status.text( d.offset + ' / ' + d.total + ' — ' + pct + '%' );
+			cfg.$log.show();
 
-                $.post( ismData.ajaxUrl, {
-                        action: 'ism_orphan_scan',
-                        nonce:  ismData.orphanNonce,
-                }, function ( res ) {
-                        $btn.prop( 'disabled', false );
-                        if ( ! res.success ) {
-                                $status.text( 'Error: ' + ( res.data || 'scan failed' ) );
-                                return;
-                        }
-                        var count = res.data.count;
-                        var size  = res.data.total_size;
+			$.each( d.messages, function ( i, msg ) {
+				var cls = msg.type === 'error' ? 'ism-regen-log-error' : 'ism-regen-log-ok';
+				cfg.$log.append( '<li class="' + cls + '">' + $( '<span>' ).text( msg.text ).html() + '</li>' );
+				cfg.$log.scrollTop( cfg.$log[ 0 ].scrollHeight );
+			} );
 
-                        if ( count === 0 ) {
-                                $status.text( 'No orphaned files found.' );
-                                return;
-                        }
+			if ( d.done ) {
+				cfg.$cancelBtn.hide();
+				cfg.onDone( d );
+			} else {
+				cfg.offset = d.offset;
+				setTimeout( function () { bulkRunBatch( cfg ); }, 200 );
+			}
+		} ).fail( function () {
+			cfg.$status.text( 'Request failed. Reload and try again.' );
+			cfg.$cancelBtn.hide();
+		} );
+	}
 
-                        $status.text( '' );
-                        $( '.ism-orphan-summary' ).html(
-                                '<strong>' + count + '</strong> orphaned file' + ( count === 1 ? '' : 's' ) +
-                                ' found &mdash; <strong>' + size + '</strong> total'
-                        );
+	// ── Bulk resize ──────────────────────────────────────────────────────────
+	( function () {
+		var aborted = false;
 
-                        var rows = '';
-                        $.each( res.data.orphans, function ( i, f ) {
-                                rows += '<tr>' +
-                                        '<td><input type="checkbox" class="ism-orphan-cb" data-path="' + esc( f.rel_path ) + '"></td>' +
-                                        '<td><code>' + esc( f.rel_path ) + '</code></td>' +
-                                        '<td>' + esc( f.filesize ) + '</td>' +
-                                        '<td>' + esc( f.modified ) + '</td>' +
-                                        '</tr>';
-                        } );
-                        $( '#ism-orphan-tbody' ).html( rows );
-                        $( '#ism-orphan-results' ).show();
-                        orphanUpdateDeleteBtn();
-                } ).fail( function () {
-                        $btn.prop( 'disabled', false );
-                        $status.text( 'Request failed.' );
-                } );
-        } );
+		$( '#ism-bulk-resize-start' ).on( 'click', function () {
+			if ( ! window.confirm( 'This will resize every image in your library that exceeds the configured max-upload dimensions. The originals will be overwritten. Continue?' ) ) {
+				return;
+			}
+			aborted = false;
+			var $startBtn = $( '#ism-bulk-resize-start' );
+			var $cancelBtn = $( '#ism-bulk-resize-cancel' );
+			var $progress  = $( '#ism-bulk-resize-progress' );
+			var $bar       = $( '#ism-bulk-resize-bar' );
+			var $status    = $( '#ism-bulk-resize-status' );
+			var $log       = $( '#ism-bulk-resize-log' );
 
-        $( '#ism-orphan-select-all' ).on( 'change', function () {
-                $( '#ism-orphan-tbody input[type="checkbox"]' ).prop( 'checked', $( this ).is( ':checked' ) );
-                orphanUpdateDeleteBtn();
-        } );
+			$startBtn.prop( 'disabled', true );
+			$cancelBtn.show();
+			$progress.show();
+			$bar.css( 'width', '0%' );
+			$status.text( 'Collecting images…' );
+			$log.hide().empty();
 
-        $( document ).on( 'change', '.ism-orphan-cb', function () {
-                orphanUpdateDeleteBtn();
-        } );
+			$.post( ismData.ajaxUrl, {
+				action: 'ism_bulk_resize_init',
+				nonce:  ismData.bulkResizeNonce,
+			}, function ( res ) {
+				if ( ! res.success ) {
+					$status.text( 'Error: ' + ( res.data || 'unknown' ) );
+					$startBtn.prop( 'disabled', false );
+					$cancelBtn.hide();
+					return;
+				}
+				var d = res.data;
+				if ( d.total === 0 ) {
+					$status.text( 'No images found in library.' );
+					$startBtn.prop( 'disabled', false );
+					$cancelBtn.hide();
+					return;
+				}
+				$status.text( '0 / ' + d.total + ' — 0%' );
+				bulkRunBatch( {
+					batchAction:  'ism_bulk_resize_batch',
+					transientKey: d.transient_key,
+					offset:       0,
+					total:        d.total,
+					$bar:         $bar,
+					$status:      $status,
+					$log:         $log,
+					$cancelBtn:   $cancelBtn,
+					abortFlag:    function () { return aborted; },
+					onDone: function ( data ) {
+						$startBtn.prop( 'disabled', false );
+						$status.text( 'Done! ' + data.total + ' image(s) checked, ' + ( data.total_resized || 0 ) + ' resized.' );
+					},
+				} );
+			} ).fail( function () {
+				$status.text( 'Init request failed.' );
+				$startBtn.prop( 'disabled', false );
+				$cancelBtn.hide();
+			} );
+		} );
 
-        $( '#ism-orphan-delete-btn' ).on( 'click', function () {
-                var paths = [];
-                $( '#ism-orphan-tbody input[type="checkbox"]:checked' ).each( function () {
-                        paths.push( $( this ).data( 'path' ) );
-                } );
-                if ( paths.length === 0 ) { return; }
+		$( '#ism-bulk-resize-cancel' ).on( 'click', function () {
+			aborted = true;
+			$( this ).prop( 'disabled', true ).text( 'Cancelling…' );
+		} );
+	}() );
 
-                // eslint-disable-next-line no-alert
-                if ( ! confirm( 'Permanently delete ' + paths.length + ' file' + ( paths.length === 1 ? '' : 's' ) + '? This cannot be undone.' ) ) {
-                        return;
-                }
+	// ── Remove -scaled ───────────────────────────────────────────────────────
+	( function () {
+		var aborted = false;
 
-                var $btn    = $( this );
-                var $status = $( '.ism-orphan-status' );
-                $btn.prop( 'disabled', true );
-                $status.text( 'Deleting\u2026' );
+		$( '#ism-descale-start' ).on( 'click', function () {
+			if ( ! window.confirm( 'This will permanently delete all -scaled image files and update the media library to point to the originals. Continue?' ) ) {
+				return;
+			}
+			aborted = false;
+			var $startBtn  = $( '#ism-descale-start' );
+			var $cancelBtn = $( '#ism-descale-cancel' );
+			var $progress  = $( '#ism-descale-progress' );
+			var $bar       = $( '#ism-descale-bar' );
+			var $status    = $( '#ism-descale-status' );
+			var $log       = $( '#ism-descale-log' );
 
-                $.post( ismData.ajaxUrl, {
-                        action: 'ism_orphan_delete',
-                        nonce:  ismData.orphanNonce,
-                        paths:  paths,
-                }, function ( res ) {
-                        $btn.prop( 'disabled', false );
-                        if ( ! res.success ) {
-                                $status.text( 'Error during deletion.' );
-                                return;
-                        }
-                        var deleted = res.data.deleted;
-                        var errors  = res.data.errors;
+			$startBtn.prop( 'disabled', true );
+			$cancelBtn.show();
+			$progress.show();
+			$bar.css( 'width', '0%' );
+			$status.text( 'Scanning for -scaled images…' );
+			$log.hide().empty();
 
-                        // Remove successfully deleted rows
-                        $( '#ism-orphan-tbody input[type="checkbox"]:checked' ).each( function () {
-                                var path = $( this ).data( 'path' );
-                                if ( deleted.indexOf( path ) !== -1 ) {
-                                        $( this ).closest( 'tr' ).remove();
-                                }
-                        } );
+			$.post( ismData.ajaxUrl, {
+				action: 'ism_descale_init',
+				nonce:  ismData.bulkResizeNonce,
+			}, function ( res ) {
+				if ( ! res.success ) {
+					$status.text( 'Error: ' + ( res.data || 'unknown' ) );
+					$startBtn.prop( 'disabled', false );
+					$cancelBtn.hide();
+					return;
+				}
+				var d = res.data;
+				if ( d.total === 0 ) {
+					$status.text( 'No -scaled images found.' );
+					$startBtn.prop( 'disabled', false );
+					$cancelBtn.hide();
+					return;
+				}
+				$status.text( 'Found ' + d.total + ' -scaled image(s). Processing…' );
+				bulkRunBatch( {
+					batchAction:  'ism_descale_batch',
+					transientKey: d.transient_key,
+					offset:       0,
+					total:        d.total,
+					$bar:         $bar,
+					$status:      $status,
+					$log:         $log,
+					$cancelBtn:   $cancelBtn,
+					abortFlag:    function () { return aborted; },
+					onDone: function ( data ) {
+						$startBtn.prop( 'disabled', false );
+						$status.text( 'Done! ' + ( data.total_cleaned || 0 ) + ' -scaled file(s) removed.' );
+					},
+				} );
+			} ).fail( function () {
+				$status.text( 'Init request failed.' );
+				$startBtn.prop( 'disabled', false );
+				$cancelBtn.hide();
+			} );
+		} );
 
-                        var msg = deleted.length + ' file' + ( deleted.length === 1 ? '' : 's' ) + ' deleted.';
-                        if ( errors.length > 0 ) { msg += ' ' + errors.length + ' could not be deleted.'; }
-                        $status.text( msg );
+		$( '#ism-descale-cancel' ).on( 'click', function () {
+			aborted = true;
+			$( this ).prop( 'disabled', true ).text( 'Cancelling…' );
+		} );
+	}() );
 
-                        $( '#ism-orphan-select-all' ).prop( 'checked', false );
-                        orphanUpdateDeleteBtn();
+	// ── Image size usage scanner ─────────────────────────────────────────────
+	( function () {
+		var currentSizes = null;
 
-                        var remaining = $( '#ism-orphan-tbody tr' ).length;
-                        if ( remaining === 0 ) {
-                                $( '.ism-orphan-summary' ).text( 'All selected files deleted.' );
-                                $( '#ism-orphan-results' ).hide();
-                        } else {
-                                $( '.ism-orphan-summary' ).html(
-                                        '<strong>' + remaining + '</strong> orphaned file' + ( remaining === 1 ? '' : 's' ) + ' remaining'
-                                );
-                        }
-                } ).fail( function () {
-                        $btn.prop( 'disabled', false );
-                        $status.text( 'Request failed.' );
-                } );
-        } );
+		var statusLabels = {
+			core:    { text: 'Core',    cls: 'ism-badge-core' },
+			in_use:  { text: 'In Use',  cls: 'ism-badge-in-use' },
+			plugin:  { text: 'Plugin',  cls: 'ism-badge-plugin' },
+			unused:  { text: 'Unused',  cls: 'ism-badge-unused' },
+		};
+
+		$( '#ism-size-scan-start' ).on( 'click', function () {
+			var $btn     = $( this );
+			var $results = $( '#ism-size-scan-results' );
+			var $tbody   = $( '#ism-scan-tbody' );
+			var $summary = $( '#ism-scan-summary' );
+
+			$btn.prop( 'disabled', true ).text( 'Scanning…' );
+			$results.hide();
+			$tbody.empty();
+			currentSizes = null;
+
+			$.post( ismData.ajaxUrl, {
+				action: 'ism_size_usage_scan',
+				nonce:  ismData.sizeUsageNonce,
+			}, function ( res ) {
+				$btn.prop( 'disabled', false ).text( 'Scan Now' );
+
+				if ( ! res.success ) {
+					$summary.text( 'Error: ' + ( res.data || 'Unknown error' ) );
+					$results.show();
+					return;
+				}
+
+				var d     = res.data;
+				var sizes = d.sizes;
+				var unused = 0;
+				currentSizes = sizes;
+
+				Object.keys( sizes ).forEach( function ( slug ) {
+					var s        = sizes[ slug ];
+					if ( s.status === 'unused' ) unused++;
+
+					var label    = statusLabels[ s.status ] || { text: s.status, cls: '' };
+					var dims     = ( s.width || '?' ) + ' × ' + ( s.height || '?' )
+					             + ( s.crop ? ' (crop)' : '' );
+					var note     = s.plugin_note ? ' <span class="ism-scan-plugin-note">(' + $( '<span>' ).text( s.plugin_note ).html() + ')</span>' : '';
+					var safeSlug = $( '<span>' ).text( slug ).html();
+
+					var $totalTd;
+					if ( s.usages && s.usages.length ) {
+						$totalTd = $( '<td>' ).html(
+							'<button type="button" class="button-link ism-usage-expand" data-slug="' + safeSlug + '">' +
+							'<strong>' + s.total + '</strong>&thinsp;<span class="ism-expand-arrow">&#9660;</span></button>'
+						);
+					} else {
+						$totalTd = $( '<td>' ).html( '<strong>' + ( s.total || 0 ) + '</strong>' );
+					}
+
+					var $tr = $( '<tr>' ).append(
+						$( '<td>' ).html( '<code>' + safeSlug + '</code>' ),
+						$( '<td>' ).text( dims ),
+						$( '<td>' ).html( '<span class="ism-badge ' + label.cls + '">' + label.text + '</span>' + note ),
+						$( '<td>' ).text( s.post_content || 0 ),
+						$( '<td>' ).text( s.elementor    || 0 ),
+						$totalTd,
+						$( '<td>' ).text( s.file_count   || 0 )
+					);
+
+					if ( s.status === 'unused' ) $tr.addClass( 'ism-row-unused' );
+					$tbody.append( $tr );
+				} );
+
+				var Ep = d.elementor_pages > 0
+					? ', ' + d.elementor_pages + ' Elementor page' + ( d.elementor_pages === 1 ? '' : 's' )
+					: ' (Elementor not found or no Elementor pages)';
+				$summary.text(
+					'Scanned ' + d.posts_scanned + ' post' + ( d.posts_scanned === 1 ? '' : 's' )
+					+ Ep + '. '
+					+ unused + ' size' + ( unused === 1 ? '' : 's' ) + ' appear unused.'
+				);
+
+				$results.show();
+			} ).fail( function () {
+				$btn.prop( 'disabled', false ).text( 'Scan Now' );
+				$summary.text( 'Request failed. Please reload and try again.' );
+				$results.show();
+			} );
+		} );
+
+		// Expand / collapse detail row showing which posts reference each size.
+		$( document ).on( 'click', '.ism-usage-expand', function () {
+			if ( ! currentSizes ) return;
+
+			var $btn    = $( this );
+			var slug    = $btn.data( 'slug' );
+			var $row    = $btn.closest( 'tr' );
+			var $detail = $row.next( '.ism-usage-detail-row' );
+
+			if ( $detail.length ) {
+				$detail.toggle();
+				$btn.find( '.ism-expand-arrow' ).html( $detail.is( ':visible' ) ? '&#9650;' : '&#9660;' );
+				return;
+			}
+
+			var sizeData = currentSizes[ slug ];
+			if ( ! sizeData || ! sizeData.usages || ! sizeData.usages.length ) return;
+
+			var html = '<ul class="ism-usage-list">';
+			sizeData.usages.forEach( function ( u ) {
+				var safeTitle = $( '<span>' ).text( u.title || '(no title)' ).html();
+				var srcLabel  = u.source === 'elementor'
+					? ' <span class="ism-source-label ism-source-elementor">Elementor</span>'
+					: ' <span class="ism-source-label ism-source-content">Content</span>';
+				if ( u.url ) {
+					html += '<li><a href="' + u.url + '" target="_blank">' + safeTitle + '</a>' + srcLabel + '</li>';
+				} else {
+					html += '<li>' + safeTitle + srcLabel + '</li>';
+				}
+			} );
+			html += '</ul>';
+
+			$row.after(
+				'<tr class="ism-usage-detail-row"><td colspan="7" class="ism-usage-detail-cell">' + html + '</td></tr>'
+			);
+			$btn.find( '.ism-expand-arrow' ).html( '&#9650;' );
+		} );
+	}() );
 
 } )( jQuery );

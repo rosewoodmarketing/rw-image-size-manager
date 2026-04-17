@@ -1,10 +1,10 @@
 # RW Image Size Manager
 
-**Version:** 1.1.6  
+**Version:** 1.2.0  
 **Author:** Anthony Burkholder  
 **License:** GPL-2.0+  
 **Requires WordPress:** 6.0+  
-**Tested up to:** 6.7  
+**Tested up to:** 6.9  
 
 A WordPress admin plugin for viewing, toggling, and customizing image sizes across the entire site — including per-post-type allowlists, custom size registration, original-upload dimension limits, thumbnail regeneration, a media log, and an orphaned-file scanner.
 
@@ -41,6 +41,18 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 - Browse all uploaded images with pagination and filename search.
 - Shows each image's original dimensions, file size, parent post, upload date, and all generated size variants with existence and file-size checks.
 
+### Image Size Usage Scanner
+- Scan all published content to identify which registered image sizes are actually referenced.
+- Detects references in Gutenberg/block editor (`sizeSlug`), Classic Editor HTML (`size-*` CSS classes), gallery shortcodes, and Elementor widget data.
+- Correctly detects Elementor's Image widget default size (`large`) even when Elementor omits the key from stored JSON.
+- Classifies each size as **Core** (always needed), **In Use** (referenced in content), **Plugin** (WooCommerce — used in PHP templates), or **Unused** (no references found).
+- Click any non-zero Total Refs count to expand an inline list of posts/pages where that size is used, with direct edit links and source badges (Content / Elementor).
+- Includes explanatory notes on srcset fallback behaviour and PHP-template limitations.
+
+### Bulk Image Tools (Advanced tab)
+- **Resize Existing Images:** batch-resizes all images on disk to fit within the configured Max Upload Dimensions without regenerating all sizes.
+- **Find & Remove -scaled Images:** removes WordPress `-scaled` backup files and repoints the media library to the originals; only enabled when the max upload dimension suppresses future `-scaled` creation.
+
 ### Orphaned Files Scanner
 - Scans the uploads directory and lists image files with no corresponding media library entry.
 - Allows batch deletion of selected orphans with a path-traversal safety check.
@@ -56,6 +68,13 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 ---
 
 ## Changelog
+
+### 1.2.0 — 2026-04-17
+- **New feature:** Image Size Usage Scanner — scans all published content and Elementor pages to classify each registered size as Core, In Use, Plugin (template), or Unused. Counts are deduplicated per-post (a post matching multiple patterns still counts as one reference). Click any count to expand an inline list of posts/pages using that size.
+- **Bug fix (scanner):** Elementor's Image widget omits `image_size` from stored JSON when it equals its default (`large`). The scanner now uses a recursive JSON walker with per-widget-type defaults instead of regex, so default-size widgets are correctly detected.
+- **Bug fix (scanner):** Elementor query previously pulled all `_elementor_data` rows regardless of post status, inflating the page count with revisions, trashed posts, and auto-drafts. Fixed with an `INNER JOIN` to `wp_posts` filtering to live post statuses only.
+- **New feature:** Bulk Image Tools tab (renamed to Advanced tab) — groups Resize Existing Images and Find & Remove -scaled Images tools.
+- **Infrastructure:** AJAX handler functions extracted from `image-size-manager.php` into `includes/ajax-handlers.php` for maintainability.
 
 ### 1.1.6 — 2026-03-14
 - **UI:** Added a warning notice to the Orphaned Files tab advising users to test in a staging environment before running deletions.
@@ -82,3 +101,12 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 - Disabling a size only prevents future generation. Existing files for that size are **not** deleted automatically — use the Thumbnail Regeneration tool after changing size settings.
 - The Auto-Delete Images feature is **permanent and cannot be undone**. Images shared with other posts will also be deleted.
 - The Orphaned Files scanner loads the full uploads directory into memory. On very large sites this operation may be slow.
+
+
+
+Plugin updates workflow:
+1. Make changes locally
+2. Bump the version in image-size-manager.php (header + ISM_VERSION constant) and add a changelog entry to README.md
+3. git add -A && git commit -m "vX.X.X – description" && git push
+4. Publish a new release on GitHub tagged vX.X.X
+5. All sites running the plugin will see the update in WP Admin → Updates automatically

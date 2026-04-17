@@ -41,8 +41,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<button type="button" class="ism-tab" data-target="ism-panel-media-log">
 				<?php esc_html_e( 'Media Log', 'image-size-manager' ); ?>
 			</button>
-			<button type="button" class="ism-tab" data-target="ism-panel-orphans">
-				<?php esc_html_e( 'Orphaned Files', 'image-size-manager' ); ?>
+			<button type="button" class="ism-tab ism-tab-advanced" data-target="ism-panel-advanced">
+				<?php esc_html_e( 'Advanced', 'image-size-manager' ); ?>
 			</button>
 		</nav>
 
@@ -184,6 +184,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 					</td>
 				</tr>
 			</table>
+
 		</div><!-- /ism-panel-sizes -->
 
 		<!-- ═══════════════════════════════════════════════════════════════════
@@ -476,43 +477,169 @@ if ( ! defined( 'ABSPATH' ) ) {
 		</div><!-- /ism-panel-media-log -->
 
 		<!-- ═══════════════════════════════════════════════════════════════════
-		     PANEL 5 – ORPHANED FILES
+		     PANEL 5 – ADVANCED (BULK TOOLS)
 		     ══════════════════════════════════════════════════════════════════ -->
-		<div id="ism-panel-orphans" class="ism-panel" hidden>
-			<div class="ism-card">
-				<h2><?php esc_html_e( 'Orphaned Files', 'image-size-manager' ); ?></h2>
-				<p class="ism-warning">
-					⚠️ <?php esc_html_e( 'Warning:', 'image-size-manager' ); ?></strong> <?php esc_html_e( 'This feature has not been thoroughly tested. Please run this in a test environment or use another plugin to clean up orphaned files.', 'image-size-manager' ); ?></p>
+		<div id="ism-panel-advanced" class="ism-panel" hidden>
+			<h2><?php esc_html_e( 'Advanced', 'image-size-manager' ); ?></h2>
+			<p class="description">
+				<?php esc_html_e( 'One-time cleanup tools for existing sites. On a properly configured new site these should rarely be needed.', 'image-size-manager' ); ?>
+			</p>
+
+			<h3 style="margin: 24px 0 6px"><?php esc_html_e( 'Bulk Image Tools', 'image-size-manager' ); ?></h3>
+			<p class="description" style="margin-bottom:18px">
+				<?php esc_html_e( 'Apply the Max Upload Dimensions setting to your existing library, or clean up -scaled files WordPress created for images larger than 2560px. Both operations run in small batches to avoid timeouts.', 'image-size-manager' ); ?>
+			</p>
+
+			<?php
+			$max_w = (int) ( $settings['max_upload_width']  ?? 0 );
+			$max_h = (int) ( $settings['max_upload_height'] ?? 0 );
+			$has_limits = $max_w > 0 || $max_h > 0;
+			?>
+
+			<!-- Bulk resize ─────────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card">
+				<h4><?php esc_html_e( 'Resize Existing Images to Max Upload Dimensions', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php
+					if ( $has_limits ) {
+						printf(
+							esc_html__( 'Current limits: %s. Any image larger than this will be resized in-place and its metadata updated.', 'image-size-manager' ),
+							esc_html(
+								( $max_w > 0 ? $max_w . 'px wide' : '' )
+								. ( $max_w > 0 && $max_h > 0 ? ' × ' : '' )
+								. ( $max_h > 0 ? $max_h . 'px tall' : '' )
+							)
+						);
+					} else {
+						esc_html_e( 'No max upload dimensions are set. Configure them in the Registered Sizes tab, save, then return here.', 'image-size-manager' );
+					}
+					?>
 				</p>
-				<p class="description"><?php esc_html_e( 'These image files exist in your uploads folder but have no matching entry in the WordPress media library. Scan first, then delete any you no longer need.', 'image-size-manager' ); ?></p>
-
-				<div class="ism-orphan-toolbar">
-					<button type="button" class="button button-primary" id="ism-orphan-scan-btn"><?php esc_html_e( 'Scan Uploads Folder', 'image-size-manager' ); ?></button>
-					<span class="ism-orphan-status"></span>
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-bulk-resize-start"
+						<?php disabled( ! $has_limits ); ?>>
+						<?php esc_html_e( 'Resize All Existing Images', 'image-size-manager' ); ?>
+					</button>
+					<button type="button" class="button" id="ism-bulk-resize-cancel" style="display:none">
+						<?php esc_html_e( 'Cancel', 'image-size-manager' ); ?>
+					</button>
 				</div>
-
-				<div id="ism-orphan-results" style="display:none">
-					<div class="ism-orphan-summary"></div>
-
-					<div class="ism-orphan-actions">
-						<label><input type="checkbox" id="ism-orphan-select-all"> <?php esc_html_e( 'Select all', 'image-size-manager' ); ?></label>
-						<button type="button" class="button button-link-delete" id="ism-orphan-delete-btn" disabled><?php esc_html_e( 'Delete selected', 'image-size-manager' ); ?></button>
-					</div>
-
-					<table class="widefat ism-orphan-table">
-						<thead>
-							<tr>
-								<th style="width:32px"></th>
-								<th><?php esc_html_e( 'File path', 'image-size-manager' ); ?></th>
-								<th><?php esc_html_e( 'Size', 'image-size-manager' ); ?></th>
-								<th><?php esc_html_e( 'Modified', 'image-size-manager' ); ?></th>
-							</tr>
-						</thead>
-						<tbody id="ism-orphan-tbody"></tbody>
-					</table>
+				<div class="ism-progress-wrap" id="ism-bulk-resize-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-bulk-resize-bar"></div></div>
+					<p class="ism-progress-status" id="ism-bulk-resize-status"></p>
+					<ul class="ism-regen-log" id="ism-bulk-resize-log" style="display:none"></ul>
 				</div>
 			</div>
-		</div><!-- /ism-panel-orphans -->
+
+			<?php
+			$scaling_suppressed = $max_w > 0 || $max_h > 0;
+			$scaling_limit      = $scaling_suppressed ? max( $max_w, $max_h ) : 0;
+			$below_threshold    = $scaling_suppressed && $scaling_limit < 2560;
+			$above_threshold    = $scaling_suppressed && $scaling_limit >= 2560;
+			?>
+
+			<!-- Remove -scaled ──────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Remove WordPress -scaled Images', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'WordPress automatically creates a -scaled version of any image larger than 2560px. This tool deletes those -scaled files from disk and repoints the media library to the original file.', 'image-size-manager' ); ?>
+				</p>
+
+				<?php if ( $below_threshold ) : ?>
+				<p class="description" style="color:#1d7e2d; margin-top:6px; font-weight:500">
+					<?php
+					printf(
+						esc_html__( '✓ WordPress -scaled images are disabled. Your Max Upload size (%dpx) is below WordPress\'s 2560px threshold, so -scaled files will never be created on new uploads — it is safe to remove any existing ones.', 'image-size-manager' ),
+						esc_html( $scaling_limit )
+					);
+					?>
+				</p>
+				<?php elseif ( $above_threshold ) : ?>
+				<p class="description" style="color:#996800; margin-top:6px; font-weight:500">
+					<?php
+					printf(
+						esc_html__( '⚠ WordPress -scaled images are being generated because your Max Upload size (%dpx) is greater than 2560px. Lower your Max Upload Width or Height below 2560px to disable -scaled files before running this tool.', 'image-size-manager' ),
+						esc_html( $scaling_limit )
+					);
+					?>
+				</p>
+				<?php else : ?>
+				<p class="description" style="color:#b32d2e; margin-top:6px">
+					<?php esc_html_e( '⚠ WordPress -scaled images are currently being generated because no Max Upload size is configured (WordPress default is 2560px). Set a Max Upload Width or Height in the Registered Sizes tab and save first to disable -scaled before running this tool.', 'image-size-manager' ); ?>
+				</p>
+				<?php endif; ?>
+
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-descale-start"
+						<?php disabled( ! $below_threshold ); ?>>
+						<?php esc_html_e( 'Find & Remove -scaled Images', 'image-size-manager' ); ?>
+					</button>
+					<button type="button" class="button" id="ism-descale-cancel" style="display:none">
+						<?php esc_html_e( 'Cancel', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-descale-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-descale-bar"></div></div>
+					<p class="ism-progress-status" id="ism-descale-status"></p>
+					<ul class="ism-regen-log" id="ism-descale-log" style="display:none"></ul>
+				</div>
+			</div>
+
+			<!-- Image size usage scanner ─────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" style="margin-top:18px" id="ism-size-scan-card">
+				<h4><?php esc_html_e( 'Scan Image Size Usage', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Scans all content in this site to find which registered image sizes are actually used. Use the results to identify sizes that can safely be disabled to stop generating unnecessary files.', 'image-size-manager' ); ?>
+				</p>
+
+				<!-- What gets scanned -->
+				<ul class="ism-scan-sources">
+					<li><strong><?php esc_html_e( 'Gutenberg / Block Editor', 'image-size-manager' ); ?></strong> — <?php esc_html_e( 'detects the selected size in image blocks and gallery blocks across all published, draft, and private posts.', 'image-size-manager' ); ?></li>
+					<li><strong><?php esc_html_e( 'Classic Editor', 'image-size-manager' ); ?></strong> — <?php esc_html_e( 'detects size CSS classes (size-large, attachment-medium, etc.) added by WordPress when an image is inserted.', 'image-size-manager' ); ?></li>
+					<li><strong><?php esc_html_e( 'Gallery Shortcode', 'image-size-manager' ); ?></strong> — <?php esc_html_e( 'reads the size="…" attribute of [gallery] shortcodes.', 'image-size-manager' ); ?></li>
+					<li><strong><?php esc_html_e( 'Elementor', 'image-size-manager' ); ?></strong> — <?php esc_html_e( 'reads the _elementor_data JSON stored for each page, covering Image widgets, Background Image, Logo, and any widget with an image size control.', 'image-size-manager' ); ?></li>
+				</ul>
+
+				<p class="description ism-scan-caveat">
+					<strong><?php esc_html_e( 'Note on srcset (responsive images):', 'image-size-manager' ); ?></strong>
+					<?php esc_html_e( 'WordPress automatically builds a srcset from all available image sizes and lets the browser pick the best fit for each viewport. A size that shows as "Unused" in content may still be served to some device widths. If you disable an unused size, the browser will fall back to the next larger available size — this is usually fine if the gap in width between sizes is not too large.', 'image-size-manager' ); ?>
+				</p>
+				<p class="description ism-scan-caveat">
+					<strong><?php esc_html_e( 'Note on theme and plugin templates:', 'image-size-manager' ); ?></strong>
+					<?php esc_html_e( 'This scanner only reads database content. Sizes referenced directly in PHP templates (e.g. the_post_thumbnail("hero") in a theme file, or WooCommerce product image templates) will not be detected. WooCommerce sizes are automatically marked as "Plugin" to prevent accidental disabling.', 'image-size-manager' ); ?>
+				</p>
+
+				<div class="ism-regen-controls" style="margin-top:14px">
+					<button type="button" class="button button-primary" id="ism-size-scan-start">
+						<?php esc_html_e( 'Scan Now', 'image-size-manager' ); ?>
+					</button>
+				</div>
+
+				<div id="ism-size-scan-results" style="display:none; margin-top:18px">
+					<p class="ism-scan-summary" id="ism-scan-summary"></p>
+					<table class="widefat ism-scan-results-table">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Size', 'image-size-manager' ); ?></th>
+								<th><?php esc_html_e( 'Dimensions', 'image-size-manager' ); ?></th>
+								<th><?php esc_html_e( 'Status', 'image-size-manager' ); ?></th>
+								<th><?php esc_html_e( 'Content', 'image-size-manager' ); ?></th>
+								<th><?php esc_html_e( 'Elementor', 'image-size-manager' ); ?></th>
+								<th><?php esc_html_e( 'Total Refs', 'image-size-manager' ); ?></th>
+								<th><?php esc_html_e( 'Files on Disk', 'image-size-manager' ); ?></th>
+							</tr>
+						</thead>
+						<tbody id="ism-scan-tbody">
+							<!-- Populated by JS -->
+						</tbody>
+					</table>
+					<p class="description" style="margin-top:10px">
+						<?php esc_html_e( 'To disable an unused size, go to the Registered Sizes tab and toggle it off, then save.', 'image-size-manager' ); ?>
+					</p>
+				</div>
+			</div>
+
+		</div><!-- /ism-panel-advanced -->
 
 		<!-- ── Submit ────────────────────────────────────────────────────── -->
 		<p class="ism-submit-row">
