@@ -135,7 +135,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 					<?php else : ?>
 					<td><?php echo esc_html( $size['width']  ?: '—' ); ?></td>
 					<td><?php echo esc_html( $size['height'] ?: '—' ); ?></td>
-					<td><?php echo $size['crop'] ? '✓' : '—'; ?></td>
+					<td><?php echo esc_html( $size['crop'] ? '✓' : '—' ); ?></td>
 					<?php endif; ?>
 				</tr>
 				<?php endforeach; ?>

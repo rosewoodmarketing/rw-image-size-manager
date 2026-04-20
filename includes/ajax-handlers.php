@@ -523,7 +523,7 @@ function ism_ajax_descale_batch(): void {
  * File counts come from _wp_attachment_metadata so no filesystem access is needed.
  */
 function ism_ajax_size_usage_scan(): void {
-	check_ajax_referer( 'ism_bulk_resize', 'nonce' );
+	check_ajax_referer( 'ism_size_usage_scan', 'nonce' );
 	if ( ! current_user_can( 'manage_options' ) ) {
 		wp_send_json_error( 'Unauthorized', 403 );
 	}
@@ -708,8 +708,9 @@ function ism_ajax_size_usage_scan(): void {
 	}
 	$post_map = [];
 	if ( ! empty( $all_used_ids ) ) {
-		$ids_in    = implode( ',', array_map( 'intval', array_keys( $all_used_ids ) ) );
-		$post_rows = $wpdb->get_results( "SELECT ID, post_title FROM {$wpdb->posts} WHERE ID IN ($ids_in)" ); // phpcs:ignore WordPress.DB.PreparedSQL
+		$ids_in      = implode( ',', array_fill( 0, count( $all_used_ids ), '%d' ) );
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- format string is built from %d placeholders only
+		$post_rows = $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_title FROM {$wpdb->posts} WHERE ID IN ($ids_in)", ...array_keys( $all_used_ids ) ) );
 		foreach ( $post_rows as $pr ) {
 			$post_map[ (int) $pr->ID ] = [
 				'title' => $pr->post_title ?: '(no title)',

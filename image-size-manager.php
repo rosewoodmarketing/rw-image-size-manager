@@ -66,7 +66,7 @@ add_action( 'wp_ajax_ism_bulk_resize_batch',  'ism_ajax_bulk_resize_batch' );
 add_action( 'wp_ajax_ism_descale_init',       'ism_ajax_descale_init' );
 add_action( 'wp_ajax_ism_descale_batch',      'ism_ajax_descale_batch' );
 
-// AJAX: image size usage scanner
+// AJAX: image size usage scanner (read-only — uses its own nonce action)
 add_action( 'wp_ajax_ism_size_usage_scan',    'ism_ajax_size_usage_scan' );
 
 // Resize uploaded image originals to a configured maximum & suppress WP's own -scaled logic
@@ -221,10 +221,13 @@ function ism_filter_image_sizes( array $sizes, array $image_meta, $attachment_id
 			$post_type = get_post_type( $parent_id ) ?: '';
 		}
 
-		// Fallback: check the post_id in the current request (upload from post edit screen)
-		if ( ! $post_type && isset( $_REQUEST['post_id'] ) ) {
-			$req_post_id = (int) $_REQUEST['post_id'];
-			$post_type   = get_post_type( $req_post_id ) ?: '';
+		// Fallback: check the post_id in the current request (upload from post edit screen).
+		// Use $_POST only (not $_REQUEST) to avoid GET-based influence on size generation.
+		if ( ! $post_type && isset( $_POST['post_id'] ) ) {
+			$req_post_id = (int) $_POST['post_id'];
+			if ( $req_post_id > 0 ) {
+				$post_type = get_post_type( $req_post_id ) ?: '';
+			}
 		}
 
 		// Fallback: regen context set by ism_regen_attachment()
@@ -626,7 +629,7 @@ function ism_enqueue_assets( string $hook ): void {
 		'bulkResizeNonce'=> wp_create_nonce( 'ism_bulk_resize' ),
 		'maxUploadWidth' => (int) ism_get_settings()['max_upload_width'],
 		'maxUploadHeight'=> (int) ism_get_settings()['max_upload_height'],
-		'sizeUsageNonce' => wp_create_nonce( 'ism_bulk_resize' ),
+		'sizeUsageNonce' => wp_create_nonce( 'ism_size_usage_scan' ),
 	] );
 }
 
@@ -735,10 +738,10 @@ function ism_handle_save(): void {
 	$settings = ism_get_settings();
 
 	// ── globally disabled sizes ──────────────────────────────────────────────
-	$settings['disabled_sizes'] = array_map(
-		'sanitize_key',
-		(array) ( $_POST['ism_disabled_sizes'] ?? [] )
-	);
+	// Whitelist against registered sizes so arbitrary keys can never be stored.
+	$registered_size_keys       = array_keys( ism_get_all_registered_sizes() );
+	$submitted_disabled         = array_map( 'sanitize_key', (array) ( $_POST['ism_disabled_sizes'] ?? [] ) );
+	$settings['disabled_sizes'] = array_values( array_intersect( $submitted_disabled, $registered_size_keys ) );
 
 	// ── custom sizes ─────────────────────────────────────────────────────────
 	$raw_custom         = (array) ( $_POST['ism_custom_sizes'] ?? [] );
@@ -797,7 +800,7 @@ function ism_handle_save(): void {
 
 	ism_save_settings( $settings );
 
-	wp_redirect( add_query_arg( [ 'page' => 'image-size-manager', 'ism_saved' => '1' ], admin_url( 'admin.php' ) ) );
+	wp_safe_redirect( add_query_arg( [ 'page' => 'image-size-manager', 'ism_saved' => '1' ], admin_url( 'admin.php' ) ) );
 	exit;
 }
 
