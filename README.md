@@ -1,6 +1,6 @@
 # RW Image Size Manager
 
-**Version:** 1.2.0  
+**Version:** 1.3.0  
 **Author:** Anthony Burkholder  
 **License:** GPL-2.0+  
 **Requires WordPress:** 6.0+  
@@ -52,6 +52,7 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 ### Bulk Image Tools (Advanced tab)
 - **Resize Existing Images:** batch-resizes all images on disk to fit within the configured Max Upload Dimensions without regenerating all sizes.
 - **Find & Remove -scaled Images:** removes WordPress `-scaled` backup files and repoints the media library to the originals; only enabled when the max upload dimension suppresses future `-scaled` creation.
+- **Regenerate All Images:** batch-regenerates the entire media library using the current global settings and per-CPT rules where applicable, while deleting obsolete size files left behind by past configuration changes.
 
 ### Orphaned Files Scanner
 - Scans the uploads directory and lists image files with no corresponding media library entry.
@@ -68,6 +69,14 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 ---
 
 ## Changelog
+
+### 1.3.0 — 2026-05-20
+- **New feature:** Added **Regenerate All Images** in the Advanced tab. This processes the entire media library in batches, regenerates current sizes for every image, and deletes old thumbnail files that are no longer needed.
+- **Improvement:** Library-wide regeneration now respects per-CPT image-size rules, including images related through direct attachment parents, featured images, and WooCommerce product galleries.
+- **Bug fix:** Regeneration now removes orphaned old size files from disk even when earlier resize operations updated attachment metadata and left obsolete thumbnails untracked.
+- **Bug fix:** Regenerate All resume state now restores the correct batch offset and deleted-file totals instead of restarting progress from zero.
+- **Bug fix:** Bulk-tool cancel buttons now reset correctly between runs.
+- **Hardening:** Added uploads-directory boundary checks before deleting regenerated thumbnail files, and tightened a couple of admin-side escaping/rendering paths in the usage scanner and uploads audit UI.
 
 ### 1.2.0 — 2026-04-17
 - **New feature:** Image Size Usage Scanner — scans all published content and Elementor pages to classify each registered size as Core, In Use, Plugin (template), or Unused. Counts are deduplicated per-post (a post matching multiple patterns still counts as one reference). Click any count to expand an inline list of posts/pages using that size.
@@ -98,7 +107,7 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 
 ## Notes
 
-- Disabling a size only prevents future generation. Existing files for that size are **not** deleted automatically — use the Thumbnail Regeneration tool after changing size settings.
+- Disabling a size only prevents future generation. Existing files for that size are **not** deleted automatically — use the built-in regeneration tools after changing size settings.
 - The Auto-Delete Images feature is **permanent and cannot be undone**. Images shared with other posts will also be deleted.
 - The Orphaned Files scanner loads the full uploads directory into memory. On very large sites this operation may be slow.
 

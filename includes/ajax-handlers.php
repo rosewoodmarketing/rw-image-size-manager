@@ -127,8 +127,129 @@ function ism_ajax_regen_batch(): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Admin menu
+// Regenerate All Images (library-wide) handlers
+// ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * AJAX: initialise a library-wide regeneration run.
+ * Collects every image attachment ID, stores in a transient, supports resume.
+ */
+function ism_ajax_regen_all_init(): void {
+	check_ajax_referer( 'ism_bulk_resize', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	$transient_key = 'ism_regen_all_' . get_current_user_id();
+	$force_restart = ! empty( $_POST['force_restart'] );
+
+	// Resume a previous run if one exists and the caller didn't ask for a fresh start.
+	if ( ! $force_restart ) {
+		$existing = get_transient( $transient_key );
+		if ( is_array( $existing ) && ! empty( $existing['ids'] ) ) {
+			set_transient( $transient_key, $existing, DAY_IN_SECONDS );
+			wp_send_json_success( [
+				'transient_key' => $transient_key,
+				'total'         => count( $existing['ids'] ),
+				'offset'        => max( 0, (int) ( $existing['offset'] ?? 0 ) ),
+				'total_deleted' => (int) ( $existing['total_deleted'] ?? 0 ),
+				'resumed'       => true,
+			] );
+		}
+	}
+
+	$ids = get_posts( [
+		'post_type'      => 'attachment',
+		'post_mime_type' => 'image',
+		'post_status'    => 'inherit',
+		'posts_per_page' => -1,
+		'fields'         => 'ids',
+	] );
+
+	$ids = array_map( 'intval', $ids );
+
+	set_transient( $transient_key, [ 'ids' => $ids, 'offset' => 0, 'total_deleted' => 0 ], DAY_IN_SECONDS );
+
+	wp_send_json_success( [
+		'transient_key' => $transient_key,
+		'total'         => count( $ids ),
+		'offset'        => 0,
+		'total_deleted' => 0,
+		'resumed'       => false,
+	] );
+}
+
+/**
+ * AJAX: process one batch of attachments for library-wide regeneration.
+ * Applies global settings and per-CPT restrictions when an attachment has
+ * a parent post whose post type has rules configured.
+ */
+function ism_ajax_regen_all_batch(): void {
+	check_ajax_referer( 'ism_bulk_resize', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	@set_time_limit( 120 ); // phpcs:ignore
+
+	$transient_key = sanitize_key( $_POST['transient_key'] ?? '' );
+	$offset        = max( 0, (int) ( $_POST['offset'] ?? 0 ) );
+	$batch_size    = 3;
+
+	$saved = get_transient( $transient_key );
+	if ( ! is_array( $saved ) || ! isset( $saved['ids'] ) ) {
+		wp_send_json_error( 'Session expired — please restart to regenerate.' );
+	}
+
+	$ids           = $saved['ids'];
+	$saved_offset  = max( 0, (int) ( $saved['offset'] ?? 0 ) );
+	if ( $saved_offset > $offset ) {
+		$offset = $saved_offset;
+	}
+	$batch         = array_slice( $ids, $offset, $batch_size );
+	$messages      = [];
+	$batch_deleted = 0;
+
+	foreach ( $batch as $att_id ) {
+		$att_id   = (int) $att_id;
+		$filename = basename( get_attached_file( $att_id ) ?: "ID {$att_id}" );
+
+		// Resolve CPT context from parent, featured-image owners, or WC gallery owners.
+		$cpt_key = ism_resolve_attachment_cpt_context( $att_id );
+		$result    = ism_regen_attachment( $att_id, $cpt_key );
+
+		if ( is_wp_error( $result ) ) {
+			$messages[] = [ 'type' => 'error', 'text' => "{$filename}: " . $result->get_error_message() ];
+		} else {
+			$n             = (int) ( $result['deleted'] ?? 0 );
+			$batch_deleted += $n;
+			$suffix        = $n > 0 ? " ({$n} file" . ( $n === 1 ? '' : 's' ) . ' deleted)' : '';
+			$messages[]    = [ 'type' => 'ok', 'text' => $filename . $suffix ];
+		}
+	}
+
+	$new_offset    = $offset + count( $batch );
+	$done          = $new_offset >= count( $ids );
+	$total_deleted = (int) ( $saved['total_deleted'] ?? 0 ) + $batch_deleted;
+
+	if ( $done ) {
+		delete_transient( $transient_key );
+	} else {
+		set_transient( $transient_key, [
+			'ids'           => $ids,
+			'offset'        => $new_offset,
+			'total_deleted' => $total_deleted,
+		], DAY_IN_SECONDS );
+	}
+
+	wp_send_json_success( [
+		'messages'      => $messages,
+		'offset'        => $new_offset,
+		'total'         => count( $ids ),
+		'done'          => $done,
+		'total_deleted' => $total_deleted,
+	] );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Media Log AJAX handler
@@ -308,6 +429,38 @@ function ism_ajax_bulk_resize_batch(): void {
 		$file     = get_attached_file( $att_id );
 		$filename = $file ? basename( $file ) : "ID {$att_id}";
 
+		// When WordPress previously ran its big-image threshold it created a
+		// -scaled copy and updated _wp_attached_file to point to that copy.
+		// get_attached_file() therefore returns the -scaled version, which may
+		// already be within the limits — causing the true original (which is
+		// still oversized on disk) to be silently skipped.  WordPress stores
+		// the original filename in _wp_attachment_metadata['original_image'],
+		// so use that as the resize target when it exists.
+		$att_meta    = wp_get_attachment_metadata( $att_id );
+		$scaled_file = null;
+		if ( ! is_array( $att_meta ) ) {
+			$att_meta = [];
+		}
+
+		$current_file = $file;
+		if ( ! empty( $att_meta['original_image'] ) ) {
+			$upload_dir   = wp_upload_dir();
+			$current_rel  = get_post_meta( $att_id, '_wp_attached_file', true );
+			$current_dir  = $file ? dirname( $file ) : '';
+			if ( ! $current_dir && ! empty( $att_meta['file'] ) ) {
+				$current_dir = dirname( path_join( $upload_dir['basedir'], $att_meta['file'] ) );
+			}
+			if ( ! $current_dir && $current_rel ) {
+				$current_dir = dirname( path_join( $upload_dir['basedir'], $current_rel ) );
+			}
+			$orig_path = path_join( $current_dir ?: $upload_dir['basedir'], $att_meta['original_image'] );
+			if ( file_exists( $orig_path ) ) {
+				$scaled_file = $current_file; // will be cleaned up after a successful resize
+				$file        = $orig_path;
+				$filename    = basename( $file );
+			}
+		}
+
 		if ( ! $file || ! file_exists( $file ) ) {
 			$messages[] = [ 'type' => 'error', 'text' => "{$filename}: file not found on disk" ];
 			continue;
@@ -346,6 +499,34 @@ function ism_ajax_bulk_resize_batch(): void {
 		// Refresh attachment metadata so the library reflects the new dimensions.
 		$meta = wp_generate_attachment_metadata( $att_id, $file );
 		wp_update_attachment_metadata( $att_id, $meta );
+
+		// If we resized the original in place of a -scaled copy, repoint
+		// _wp_attached_file to the original and delete the stale -scaled file.
+		if ( $scaled_file ) {
+			$relative = _wp_relative_upload_path( $file );
+			if ( $relative ) {
+				update_post_meta( $att_id, '_wp_attached_file', $relative );
+			}
+
+			// Keep attachment mime in sync with the true canonical file.
+			$filetype = wp_check_filetype( basename( $file ) );
+			if ( ! empty( $filetype['type'] ) ) {
+				wp_update_post( [
+					'ID'             => $att_id,
+					'post_mime_type' => $filetype['type'],
+				] );
+			}
+
+			if ( $scaled_file !== $file && strpos( basename( $scaled_file ), '-scaled.' ) !== false ) {
+				$real_scaled_del = realpath( $scaled_file );
+				$uploads_real    = realpath( wp_upload_dir()['basedir'] );
+				if ( $real_scaled_del && $uploads_real
+					&& strpos( $real_scaled_del, trailingslashit( $uploads_real ) ) === 0
+					&& file_exists( $real_scaled_del ) ) {
+					@unlink( $real_scaled_del ); // phpcs:ignore
+				}
+			}
+		}
 
 		$new_size = $editor->get_size();
 		$new_w    = (int) $new_size['width'];
@@ -450,41 +631,79 @@ function ism_ajax_descale_batch(): void {
 			continue;
 		}
 
-		if ( strpos( $meta['file'], '-scaled.' ) === false ) {
-			$messages[] = [ 'type' => 'ok', 'text' => "ID {$att_id}: no -scaled file (skipped)" ];
+		$attached      = (string) get_post_meta( $att_id, '_wp_attached_file', true );
+		$meta_file_rel = (string) $meta['file'];
+
+		$scaled_rel = '';
+		if ( strpos( $meta_file_rel, '-scaled.' ) !== false ) {
+			$scaled_rel = $meta_file_rel;
+		} elseif ( $attached && strpos( $attached, '-scaled.' ) !== false ) {
+			$scaled_rel = $attached;
+		}
+
+		$dir_rel = '';
+		if ( $meta_file_rel ) {
+			$dir_rel = dirname( $meta_file_rel );
+		} elseif ( $attached ) {
+			$dir_rel = dirname( $attached );
+		}
+
+		$original_rel = '';
+		if ( ! empty( $meta['original_image'] ) ) {
+			$original_rel = ( $dir_rel && '.' !== $dir_rel )
+				? trailingslashit( $dir_rel ) . $meta['original_image']
+				: $meta['original_image'];
+		}
+
+		if ( ! $original_rel && $scaled_rel ) {
+			$original_rel = str_replace( '-scaled.', '.', $scaled_rel );
+		}
+
+		if ( ! $original_rel ) {
+			$messages[] = [ 'type' => 'ok', 'text' => "ID {$att_id}: no -scaled/original mapping found (skipped)" ];
 			continue;
 		}
 
-		$scaled_path   = $base_dir . $meta['file'];
-		$original_file = str_replace( '-scaled.', '.', $meta['file'] );
-		$original_path = $base_dir . $original_file;
-		$filename      = basename( $meta['file'] );
-
-		// Safety: both paths must resolve inside uploads.
-		$real_scaled   = realpath( $scaled_path );
+		$original_path = path_join( $base_dir, $original_rel );
 		$real_original = realpath( $original_path );
-
-		if ( $real_scaled && strpos( $real_scaled, $base_real ) === 0 && file_exists( $real_scaled ) ) {
-			@unlink( $real_scaled ); // phpcs:ignore
-		}
-
-		if ( ! $real_original || ! file_exists( $real_original ) ) {
-			$messages[] = [ 'type' => 'error', 'text' => "{$filename}: original file not found at " . basename( $original_path ) ];
+		if ( ! $real_original || strpos( $real_original, $base_real ) !== 0 || ! file_exists( $real_original ) ) {
+			$messages[] = [ 'type' => 'error', 'text' => basename( $meta_file_rel ?: $attached ?: "ID {$att_id}" ) . ": original file not found at " . basename( $original_path ) ];
 			continue;
 		}
 
-		// Repoint metadata to the original file.
-		$meta['file'] = $original_file;
+		$scaled_path = $scaled_rel ? path_join( $base_dir, $scaled_rel ) : '';
+		$real_scaled = $scaled_path ? realpath( $scaled_path ) : false;
+
+		// Repoint metadata to the original file before deleting anything.
+		$meta['file'] = $original_rel;
+		unset( $meta['original_image'] );
+		if ( $img_size = wp_getimagesize( $real_original ) ) {
+			$meta['width']  = (int) $img_size[0];
+			$meta['height'] = (int) $img_size[1];
+		}
+		if ( file_exists( $real_original ) ) {
+			$meta['filesize'] = (int) filesize( $real_original );
+		}
 		wp_update_attachment_metadata( $att_id, $meta );
 
 		// Repoint _wp_attached_file too.
-		$attached = get_post_meta( $att_id, '_wp_attached_file', true );
-		if ( $attached && strpos( $attached, '-scaled.' ) !== false ) {
-			update_post_meta( $att_id, '_wp_attached_file', str_replace( '-scaled.', '.', $attached ) );
+		update_post_meta( $att_id, '_wp_attached_file', $original_rel );
+
+		// Keep attachment mime in sync with the repointed file.
+		$filetype = wp_check_filetype( basename( $real_original ) );
+		if ( ! empty( $filetype['type'] ) ) {
+			wp_update_post( [
+				'ID'             => $att_id,
+				'post_mime_type' => $filetype['type'],
+			] );
+		}
+
+		if ( $real_scaled && strpos( $real_scaled, $base_real ) === 0 && file_exists( $real_scaled ) && $real_scaled !== $real_original ) {
+			@unlink( $real_scaled ); // phpcs:ignore
 		}
 
 		$cleaned++;
-		$messages[] = [ 'type' => 'ok', 'text' => "{$filename}: -scaled removed, metadata updated" ];
+		$messages[] = [ 'type' => 'ok', 'text' => basename( $meta_file_rel ?: $attached ?: "ID {$att_id}" ) . ': attachment repointed to original, metadata updated' ];
 	}
 
 	$new_offset    = $offset + count( $batch );

@@ -585,6 +585,30 @@ if ( ! defined( 'ABSPATH' ) ) {
 				</div>
 			</div>
 
+			<!-- Regenerate All Images ───────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Regenerate All Thumbnails', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Loops through every image in the media library, regenerates all currently enabled size variations using your global size settings, and deletes any old size files that are no longer needed. Run this after changing size settings to apply them to existing images.', 'image-size-manager' ); ?>
+				</p>
+				<p class="ism-warning">
+					⚠️ <?php esc_html_e( 'Old image size files will be permanently deleted from the server. This cannot be undone.', 'image-size-manager' ); ?>
+				</p>
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-regen-all-start">
+						<?php esc_html_e( 'Regenerate All Thumbnails', 'image-size-manager' ); ?>
+					</button>
+					<button type="button" class="button" id="ism-regen-all-cancel" style="display:none">
+						<?php esc_html_e( 'Cancel', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-regen-all-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-regen-all-bar"></div></div>
+					<p class="ism-progress-status" id="ism-regen-all-status"></p>
+					<ul class="ism-regen-log" id="ism-regen-all-log" style="display:none"></ul>
+				</div>
+			</div>
+
 			<!-- Image size usage scanner ─────────────────────────────────── -->
 			<div class="ism-card ism-bulk-card" style="margin-top:18px" id="ism-size-scan-card">
 				<h4><?php esc_html_e( 'Scan Image Size Usage', 'image-size-manager' ); ?></h4>

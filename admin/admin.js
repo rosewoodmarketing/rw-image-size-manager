@@ -540,7 +540,7 @@
 			var $log       = $( '#ism-bulk-resize-log' );
 
 			$startBtn.prop( 'disabled', true );
-			$cancelBtn.show();
+			$cancelBtn.prop( 'disabled', false ).text( 'Cancel' ).show();
 			$progress.show();
 			$bar.css( 'width', '0%' );
 			$status.text( 'Collecting images…' );
@@ -609,7 +609,7 @@
 			var $log       = $( '#ism-descale-log' );
 
 			$startBtn.prop( 'disabled', true );
-			$cancelBtn.show();
+			$cancelBtn.prop( 'disabled', false ).text( 'Cancel' ).show();
 			$progress.show();
 			$bar.css( 'width', '0%' );
 			$status.text( 'Scanning for -scaled images…' );
@@ -656,6 +656,81 @@
 		} );
 
 		$( '#ism-descale-cancel' ).on( 'click', function () {
+			aborted = true;
+			$( this ).prop( 'disabled', true ).text( 'Cancelling…' );
+		} );
+	}() );
+
+	// ── Regenerate All Images ───────────────────────────────────────────────
+	( function () {
+		var aborted = false;
+
+		$( '#ism-regen-all-start' ).on( 'click', function () {
+			if ( ! window.confirm( 'This will regenerate thumbnails for every image in the media library and delete any old size files that are no longer needed. Continue?' ) ) {
+				return;
+			}
+			aborted = false;
+			var $startBtn  = $( '#ism-regen-all-start' );
+			var $cancelBtn = $( '#ism-regen-all-cancel' );
+			var $progress  = $( '#ism-regen-all-progress' );
+			var $bar       = $( '#ism-regen-all-bar' );
+			var $status    = $( '#ism-regen-all-status' );
+			var $log       = $( '#ism-regen-all-log' );
+
+			$startBtn.prop( 'disabled', true );
+			$cancelBtn.prop( 'disabled', false ).text( 'Cancel' ).show();
+			$progress.show();
+			$bar.css( 'width', '0%' );
+			$status.text( 'Collecting images…' );
+			$log.hide().empty();
+
+			$.post( ismData.ajaxUrl, {
+				action: 'ism_regen_all_init',
+				nonce:  ismData.bulkResizeNonce,
+			}, function ( res ) {
+				if ( ! res.success ) {
+					$status.text( 'Error: ' + ( res.data || 'unknown' ) );
+					$startBtn.prop( 'disabled', false );
+					$cancelBtn.hide();
+					return;
+				}
+				var d = res.data;
+				if ( d.total === 0 ) {
+					$status.text( 'No images found in library.' );
+					$startBtn.prop( 'disabled', false );
+					$cancelBtn.hide();
+					return;
+				}
+				var startOffset = Math.max( 0, parseInt( d.offset || 0, 10 ) );
+				var startDeleted = Math.max( 0, parseInt( d.total_deleted || 0, 10 ) );
+				var pct = d.total > 0 ? Math.round( ( startOffset / d.total ) * 100 ) : 0;
+				var resumeMsg = d.resumed ? ' (resuming previous run)' : '';
+				var deletedMsg = startDeleted > 0 ? ' — ' + startDeleted + ' file' + ( startDeleted === 1 ? '' : 's' ) + ' deleted' : '';
+				$bar.css( 'width', pct + '%' );
+				$status.text( startOffset + ' / ' + d.total + ' — ' + pct + '%' + deletedMsg + resumeMsg );
+				bulkRunBatch( {
+					batchAction:  'ism_regen_all_batch',
+					transientKey: d.transient_key,
+					offset:       startOffset,
+					total:        d.total,
+					$bar:         $bar,
+					$status:      $status,
+					$log:         $log,
+					$cancelBtn:   $cancelBtn,
+					abortFlag:    function () { return aborted; },
+					onDone: function ( data ) {
+						$startBtn.prop( 'disabled', false );
+						$status.text( 'Done! ' + data.total + ' image(s) processed, ' + ( data.total_deleted || 0 ) + ' old file(s) deleted.' );
+					},
+				} );
+			} ).fail( function () {
+				$status.text( 'Init request failed.' );
+				$startBtn.prop( 'disabled', false );
+				$cancelBtn.hide();
+			} );
+		} );
+
+		$( '#ism-regen-all-cancel' ).on( 'click', function () {
 			aborted = true;
 			$( this ).prop( 'disabled', true ).text( 'Cancelling…' );
 		} );
@@ -772,11 +847,12 @@
 			var html = '<ul class="ism-usage-list">';
 			sizeData.usages.forEach( function ( u ) {
 				var safeTitle = $( '<span>' ).text( u.title || '(no title)' ).html();
+				var safeUrl   = u.url ? esc( u.url ) : '';
 				var srcLabel  = u.source === 'elementor'
 					? ' <span class="ism-source-label ism-source-elementor">Elementor</span>'
 					: ' <span class="ism-source-label ism-source-content">Content</span>';
 				if ( u.url ) {
-					html += '<li><a href="' + u.url + '" target="_blank">' + safeTitle + '</a>' + srcLabel + '</li>';
+					html += '<li><a href="' + safeUrl + '" target="_blank">' + safeTitle + '</a>' + srcLabel + '</li>';
 				} else {
 					html += '<li>' + safeTitle + srcLabel + '</li>';
 				}

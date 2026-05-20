@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       RW Image Size Manager
  * Plugin URI:        https://github.com/rosewoodmarketing/rw-image-size-manager
- * Description:       View, toggle, customize, and add image sizes. Control WooCommerce product image generation and auto-delete product images on trash deletion.
- * Version:           1.2.0
+ * Description:       View, toggle, customize, and add image sizes. Per-post-type size allowlists, max upload dimensions, bulk thumbnail regeneration, a media log, and an orphaned-file scanner.
+ * Version:           1.3.0
  * Author:            Anthony Burkholder
  * License:           GPL-2.0+
  * Text Domain:       image-size-manager
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ISM_VERSION',     '1.2.0' );
+define( 'ISM_VERSION',     '1.3.0' );
 define( 'ISM_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'ISM_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'ISM_OPTION_KEY',  'ism_settings' );
@@ -37,6 +37,20 @@ if ( is_admin() ) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 add_action( 'admin_menu',           'ism_add_admin_menu' );
+add_action( 'admin_menu', function() {
+	add_submenu_page(
+		'image-size-manager',
+		'Uploads Audit',
+		'Uploads Audit',
+		'manage_options',
+		'ism-orphaned-uploads',
+		'ism_render_orphaned_uploads_table'
+	);
+});
+
+if ( is_admin() ) {
+	require_once ISM_PLUGIN_DIR . 'admin/orphaned-uploads-table.php';
+}
 add_action( 'admin_enqueue_scripts','ism_enqueue_assets' );
 add_action( 'admin_init',           'ism_register_settings' );
 add_action( 'admin_post_ism_save',  'ism_handle_save' );
@@ -59,6 +73,10 @@ add_action( 'wp_ajax_ism_regen_batch', 'ism_ajax_regen_batch' );
 
 // AJAX: media log
 add_action( 'wp_ajax_ism_media_log', 'ism_ajax_media_log' );
+
+// AJAX: library-wide thumbnail regeneration
+add_action( 'wp_ajax_ism_regen_all_init',  'ism_ajax_regen_all_init' );
+add_action( 'wp_ajax_ism_regen_all_batch', 'ism_ajax_regen_all_batch' );
 
 // AJAX: bulk resize existing images to max-upload dims + remove -scaled files
 add_action( 'wp_ajax_ism_bulk_resize_init',   'ism_ajax_bulk_resize_init' );
@@ -214,10 +232,16 @@ function ism_filter_image_sizes( array $sizes, array $image_meta, $attachment_id
 	$post_type_rules = (array) ( $settings['post_type_rules'] ?? [] );
 	if ( ! empty( $post_type_rules ) ) {
 		$att_id    = (int) ( $attachment_id ?? 0 );
-		$parent_id = (int) wp_get_post_parent_id( $att_id );
 		$post_type = '';
 
-		if ( $parent_id ) {
+		// During regeneration, the caller provides the intended CPT context.
+		global $ism_regen_cpt;
+		if ( ! empty( $ism_regen_cpt ) ) {
+			$post_type = (string) $ism_regen_cpt;
+		}
+
+		$parent_id = (int) wp_get_post_parent_id( $att_id );
+		if ( ! $post_type && $parent_id ) {
 			$post_type = get_post_type( $parent_id ) ?: '';
 		}
 
@@ -228,12 +252,6 @@ function ism_filter_image_sizes( array $sizes, array $image_meta, $attachment_id
 			if ( $req_post_id > 0 ) {
 				$post_type = get_post_type( $req_post_id ) ?: '';
 			}
-		}
-
-		// Fallback: regen context set by ism_regen_attachment()
-		if ( ! $post_type ) {
-			global $ism_regen_cpt;
-			$post_type = $ism_regen_cpt ?? '';
 		}
 
 		if ( $post_type && isset( $post_type_rules[ $post_type ] ) ) {
@@ -454,6 +472,95 @@ function ism_collect_cpt_attachment_ids( string $cpt_key ): array {
 }
 
 /**
+ * Resolve the best post type context for an attachment.
+ *
+ * Order:
+ * 1) direct attachment parent
+ * 2) featured-image owner (_thumbnail_id)
+ * 3) WooCommerce gallery owner (_product_image_gallery)
+ *
+ * @param int $attachment_id
+ * @return string
+ */
+function ism_resolve_attachment_cpt_context( int $attachment_id ): string {
+	$attachment_id = (int) $attachment_id;
+	if ( $attachment_id <= 0 ) {
+		return '';
+	}
+
+	$candidate_types = [];
+	$push_type = static function ( string $post_type ) use ( &$candidate_types ): void {
+		if ( $post_type && ! in_array( $post_type, $candidate_types, true ) ) {
+			$candidate_types[] = $post_type;
+		}
+	};
+
+	$parent_id = (int) wp_get_post_parent_id( $attachment_id );
+	if ( $parent_id > 0 ) {
+		$parent_type = get_post_type( $parent_id ) ?: '';
+		$push_type( $parent_type );
+	}
+
+	$thumb_owner_ids = get_posts( [
+		'post_type'      => 'any',
+		'post_status'    => [ 'publish', 'draft', 'pending', 'private', 'future' ],
+		'posts_per_page' => -1,
+		'fields'         => 'ids',
+		'meta_key'       => '_thumbnail_id',
+		'meta_value'     => $attachment_id,
+	] );
+
+	foreach ( $thumb_owner_ids as $owner_id ) {
+		$thumb_type = get_post_type( (int) $owner_id ) ?: '';
+		$push_type( $thumb_type );
+	}
+
+	global $wpdb;
+	$gallery_like = '%' . $wpdb->esc_like( (string) $attachment_id ) . '%';
+	$gallery_rows = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT post_id, meta_value
+			FROM {$wpdb->postmeta}
+			WHERE meta_key = '_product_image_gallery'
+			AND meta_value LIKE %s",
+			$gallery_like
+		)
+	);
+
+	foreach ( (array) $gallery_rows as $row ) {
+		$ids = array_filter(
+			array_map( 'intval', array_map( 'trim', explode( ',', (string) $row->meta_value ) ) )
+		);
+		if ( ! in_array( $attachment_id, $ids, true ) ) {
+			continue;
+		}
+		$gallery_type = get_post_type( (int) $row->post_id ) ?: '';
+		$push_type( $gallery_type );
+	}
+
+	if ( empty( $candidate_types ) ) {
+		return '';
+	}
+
+	$settings        = ism_get_settings();
+	$post_type_rules = (array) ( $settings['post_type_rules'] ?? [] );
+	foreach ( $candidate_types as $candidate_type ) {
+		$rule = $post_type_rules[ $candidate_type ] ?? null;
+		if ( is_array( $rule ) && '1' === ( $rule['restrict_enabled'] ?? '0' ) ) {
+			return $candidate_type;
+		}
+	}
+
+	foreach ( $candidate_types as $candidate_type ) {
+		if ( isset( $post_type_rules[ $candidate_type ] ) ) {
+			return $candidate_type;
+		}
+	}
+
+	return $candidate_types[0];
+}
+
+/**
  * Regenerate one attachment.
  * Forces the CPT context so our size filter applies even when the attachment
  * has no post_parent set (e.g. featured images stored only via post meta).
@@ -545,6 +652,9 @@ function ism_regen_attachment( int $attachment_id, string $cpt_key ) {
 	$new_sizes  = (array) ( $new_meta['sizes'] ?? [] );
 	$upload_dir = wp_upload_dir();
 	$file_dir   = trailingslashit( dirname( $upload_dir['basedir'] . '/' . ( $new_meta['file'] ?? get_post_meta( $attachment_id, '_wp_attached_file', true ) ) ) );
+	$uploads_base_real = realpath( $upload_dir['basedir'] );
+	$uploads_base_real = $uploads_base_real ? trailingslashit( $uploads_base_real ) : '';
+	$real_working_file = realpath( $file );
 
 	// Build the complete set of filenames still referenced by the new metadata
 	// (covers both surviving sizes AND the original file itself).
@@ -569,14 +679,54 @@ function ism_regen_attachment( int $attachment_id, string $cpt_key ) {
 			continue; // File is still needed — keep it.
 		}
 		$old_file_path = $file_dir . $size_data['file'];
-		if ( file_exists( $old_file_path ) && @unlink( $old_file_path ) ) { // phpcs:ignore
+		$real_old_path = realpath( $old_file_path );
+		if ( ! $real_old_path || ! $uploads_base_real || strpos( $real_old_path, $uploads_base_real ) !== 0 ) {
+			continue;
+		}
+		if ( @unlink( $real_old_path ) ) { // phpcs:ignore
 			$files_deleted++;
+		}
+	}
+
+	// ── Filesystem scan: catch orphan size files not in metadata ──────────────
+	// The metadata-based loop above only removes files that are still tracked in
+	// $old_meta['sizes'].  When a previous operation (e.g. Resize All Existing
+	// Images) called wp_generate_attachment_metadata() internally it updated the
+	// stored metadata to the new filenames, silently orphaning any size files
+	// whose names changed.  This scan finds all {stem}-WxH.ext files on disk
+	// in the same directory and deletes any that are no longer referenced by the
+	// freshly regenerated metadata.
+	$stem       = pathinfo( basename( $file ), PATHINFO_FILENAME );
+	$stem_ext   = strtolower( pathinfo( basename( $file ), PATHINFO_EXTENSION ) );
+	$size_regex = '/^' . preg_quote( $stem, '/' ) . '-\d+x\d+\.' . preg_quote( $stem_ext, '/' ) . '$/i';
+	$candidates = glob( $file_dir . $stem . '-*.' . $stem_ext ); // phpcs:ignore
+
+	if ( is_array( $candidates ) ) {
+		foreach ( $candidates as $candidate ) {
+			$cbase = basename( $candidate );
+			if ( ! preg_match( $size_regex, $cbase ) ) {
+				continue; // Not a WxH size file for this image.
+			}
+			if ( isset( $new_files_referenced[ $cbase ] ) ) {
+				continue; // Still needed by new metadata.
+			}
+			$real_candidate = realpath( $candidate );
+			if ( ! $real_candidate || ! $uploads_base_real || strpos( $real_candidate, $uploads_base_real ) !== 0 ) {
+				continue;
+			}
+			if ( $real_working_file && $real_candidate === $real_working_file ) {
+				continue; // Never delete the working original itself.
+			}
+			if ( @unlink( $real_candidate ) ) { // phpcs:ignore
+				$files_deleted++;
+			}
 		}
 	}
 
 	// Delete the now-redundant -scaled file recovered in Step 1.
 	if ( $scaled_to_delete && $scaled_to_delete !== $file && file_exists( $scaled_to_delete ) ) {
-		if ( @unlink( $scaled_to_delete ) ) { // phpcs:ignore
+		$real_scaled = realpath( $scaled_to_delete );
+		if ( $real_scaled && $uploads_base_real && strpos( $real_scaled, $uploads_base_real ) === 0 && @unlink( $real_scaled ) ) { // phpcs:ignore
 			$files_deleted++;
 		}
 	}
