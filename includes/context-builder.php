@@ -554,8 +554,13 @@ function ism_context_clean_text( string $text ): string {
  * @param array $context Output of ism_context_for_attachment().
  * @return string
  */
-function ism_context_render( array $context ): string {
+function ism_context_render( array $context, array $weights = [] ): string {
 	$lines = [];
+
+	// A source weighted at zero is left out of the request altogether, which is
+	// the only part of weighting that is mechanically enforceable.
+	$want_context  = ! isset( $weights['context'] )  || $weights['context'] > 0;
+	$want_metadata = ! isset( $weights['metadata'] ) || $weights['metadata'] > 0;
 
 	$site = $context['site']['name'];
 	if ( $context['site']['tagline'] !== '' ) {
@@ -563,7 +568,9 @@ function ism_context_render( array $context ): string {
 	}
 	$lines[] = 'Website: ' . $site;
 
-	if ( ! empty( $context['usages'] ) ) {
+	if ( ! $want_context ) {
+		// Nothing about the pages at all, not even how many there are.
+	} elseif ( ! empty( $context['usages'] ) ) {
 		$lines[] = '';
 		$lines[] = sprintf(
 			'This image appears in %d place(s) on the site, listed below most relevant first.',
@@ -595,11 +602,11 @@ function ism_context_render( array $context ): string {
 		$lines[] = 'Filename suggests: ' . $context['name_hint'];
 	}
 
-	$current = array_filter( [
+	$current = $want_metadata ? array_filter( [
 		'title'   => $context['current']['title'],
 		'alt'     => $context['current']['alt'],
 		'caption' => $context['current']['caption'],
-	] );
+	] ) : [];
 	if ( ! empty( $current ) ) {
 		$lines[] = '';
 		$lines[] = 'Existing metadata:';

@@ -421,9 +421,22 @@ function ism_ajax_seo_generate(): void {
 	// decorative mark stays undescribed unless someone asks for this image.
 	$override = ! empty( $_POST['override_skip'] );
 
+	// Weights and the extra instruction are sent with every request rather than
+	// read from settings, because they are meant to be adjustable immediately
+	// before a run without saving the whole settings form first.
+	$weights = isset( $_POST['weights'] ) && is_array( $_POST['weights'] )
+		? ism_ai_normalise_weights( array_map( 'intval', wp_unslash( $_POST['weights'] ) ) )
+		: null;
+
+	$extra = isset( $_POST['extra_prompt'] )
+		? sanitize_textarea_field( wp_unslash( (string) $_POST['extra_prompt'] ) )
+		: null;
+
 	$generated = ism_ai_generate_for_attachment( $attachment_id, [
 		'image_data_url' => $data_url,
 		'override_skip'  => $override,
+		'weights'        => $weights,
+		'extra_prompt'   => $extra,
 	] );
 
 	if ( is_wp_error( $generated ) ) {
@@ -704,6 +717,36 @@ function ism_seo_cache_touch( array $ids, callable $mutate ): void {
 			'scanned_at' => $cache['scanned_at'],
 		], false );
 	}
+}
+
+/**
+ * AJAX: persist the advanced generation settings.
+ *
+ * They are adjustable per run, but a run's values become the new default so
+ * the next visit starts where the last one left off rather than resetting.
+ */
+function ism_ajax_seo_save_advanced(): void {
+	check_ajax_referer( 'ism_seo', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	$weights = ism_ai_normalise_weights(
+		array_map( 'intval', (array) wp_unslash( $_POST['weights'] ?? [] ) )
+	);
+
+	// Refused rather than rescaled: silently "fixing" a set that does not add
+	// up would hide the mistake instead of surfacing it.
+	if ( array_sum( $weights ) !== 100 ) {
+		wp_send_json_error( sprintf( 'Weights add up to %d%%, not 100%%.', array_sum( $weights ) ) );
+	}
+
+	$settings                    = ism_get_settings();
+	$settings['ai_weights']      = $weights;
+	$settings['ai_extra_prompt'] = sanitize_textarea_field( wp_unslash( (string) ( $_POST['extra_prompt'] ?? '' ) ) );
+	ism_save_settings( $settings );
+
+	wp_send_json_success( [ 'weights' => $weights, 'extra_prompt' => $settings['ai_extra_prompt'] ] );
 }
 
 /**

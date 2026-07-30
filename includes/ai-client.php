@@ -297,6 +297,79 @@ function ism_ai_cost_per_100( string $model ): float {
 }
 
 /**
+ * Estimated token cost of one image under a given configuration.
+ *
+ * Component figures are measured from real runs on the pilot site, not
+ * guessed, but they are still an estimate: page text varies per image and the
+ * model's reply length varies with the subject. The admin screen labels the
+ * result as approximate for that reason.
+ *
+ * @param array<string,int> $weights
+ * @param int               $context_chars
+ * @param int               $extra_prompt_chars
+ * @return array{input:int, output:int}
+ */
+function ism_ai_estimate_tokens( array $weights, int $context_chars, int $extra_prompt_chars ): array {
+	// The instructions, sent on every request whatever else is included.
+	$input = 340;
+
+	// A 300px medium, which is what ism_vision_pick_file() prefers.
+	if ( $weights['image'] > 0 ) {
+		$input += 130;
+	}
+
+	// Roughly four characters to a token, plus the page titles and keyword
+	// lines that are sent regardless of the body-text budget.
+	if ( $weights['context'] > 0 ) {
+		$input += (int) ceil( $context_chars / 4 ) + 60;
+	}
+
+	if ( $weights['metadata'] > 0 ) {
+		$input += 60;
+	}
+
+	if ( $weights['prompt'] > 0 && $extra_prompt_chars > 0 ) {
+		$input += (int) ceil( $extra_prompt_chars / 4 );
+	}
+
+	// The weighting instruction itself, once more than one source is in play.
+	$active = count( array_filter( $weights ) );
+	if ( $active > 1 ) {
+		$input += 25 * $active;
+	}
+
+	return [ 'input' => $input, 'output' => 150 ];
+}
+
+/**
+ * Estimated dollar cost for a run.
+ *
+ * @param string            $model
+ * @param int               $images
+ * @param array<string,int> $weights
+ * @param int               $context_chars
+ * @param int               $extra_prompt_chars
+ * @return array{per_image:float, total:float, input:int, output:int}
+ */
+function ism_ai_estimate_cost( string $model, int $images, array $weights, int $context_chars, int $extra_prompt_chars ): array {
+	$m = ism_ai_models()[ $model ] ?? null;
+	$t = ism_ai_estimate_tokens( $weights, $context_chars, $extra_prompt_chars );
+
+	if ( ! $m ) {
+		return [ 'per_image' => 0.0, 'total' => 0.0, 'input' => $t['input'], 'output' => $t['output'] ];
+	}
+
+	$per = ( $t['input'] * $m['in'] / 1000000 ) + ( $t['output'] * $m['out'] / 1000000 );
+
+	return [
+		'per_image' => $per,
+		'total'     => $per * max( 0, $images ),
+		'input'     => $t['input'],
+		'output'    => $t['output'],
+	];
+}
+
+/**
  * The model this site generates with.
  *
  * Settable from the admin screen; ISM_AI_MODEL is the fallback when nothing has
@@ -348,9 +421,19 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'dry_run'        => false,
 		'model'          => ism_ai_get_model(),
 		'override_skip'  => false,
+		'weights'        => null,
+		'extra_prompt'   => null,
 	] );
 
-	$model = (string) $args['model'];
+	$model   = (string) $args['model'];
+	$weights = $args['weights'] === null ? ism_ai_get_weights() : ism_ai_normalise_weights( (array) $args['weights'] );
+	$extra   = $args['extra_prompt'] === null ? ism_ai_get_extra_prompt() : trim( (string) $args['extra_prompt'] );
+
+	// A source weighted at zero is not sent at all, so an empty instruction and
+	// a zeroed instruction weight mean the same thing.
+	if ( $weights['prompt'] < 1 ) {
+		$extra = '';
+	}
 
 	// Checked first so a site with no key never builds a request, never reaches
 	// wp_remote_post, and never spends time on context or image decoding.
@@ -378,12 +461,28 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		);
 	}
 
-	$image = ism_ai_image_block( $attachment_id, (string) $args['image_data_url'] );
-	if ( is_wp_error( $image ) ) {
-		return $image;
+	// Weighting the image at zero means describing without looking. It is a
+	// legitimate configuration — text-only generation from page context — but a
+	// very different job, so the admin screen warns before allowing it.
+	$image = null;
+	if ( $weights['image'] > 0 ) {
+		$image = ism_ai_image_block( $attachment_id, (string) $args['image_data_url'] );
+		if ( is_wp_error( $image ) ) {
+			return $image;
+		}
 	}
 
-	$prompt  = ism_context_render( $context );
+	$prompt = ism_context_render( $context, $weights );
+
+	$weighting = ism_ai_render_weighting( $weights );
+	if ( $weighting !== '' ) {
+		$prompt .= "\n\n" . $weighting;
+	}
+
+	if ( $extra !== '' ) {
+		$prompt .= "\n\nAdditional instructions from the site owner:\n" . $extra;
+	}
+
 	$profile = ism_ai_model_profile( $model );
 
 	// format constrains the response to the schema server-side, which is a
@@ -424,10 +523,10 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'messages' => [
 			[
 				'role'    => 'user',
-				'content' => [
-					$image['block'],
+				'content' => array_values( array_filter( [
+					$image ? $image['block'] : null,
 					[ 'type' => 'text', 'text' => $prompt ],
-				],
+				] ) ),
 			],
 		],
 	];
@@ -440,12 +539,14 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 	if ( $args['dry_run'] ) {
 		// The image payload is megabytes of base64 and unreadable; summarise it
 		// so a dry run can be printed in a terminal.
-		$preview                             = $body;
-		$preview['messages'][0]['content'][0] = [
-			'type'  => 'image',
-			'bytes' => $image['bytes'],
-			'mime'  => $image['media_type'],
-		];
+		$preview = $body;
+		if ( $image ) {
+			$preview['messages'][0]['content'][0] = [
+				'type'  => 'image',
+				'bytes' => $image['bytes'],
+				'mime'  => $image['media_type'],
+			];
+		}
 
 		return [
 			'attachment_id' => $attachment_id,
@@ -455,7 +556,8 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 			'usage'         => ism_ai_empty_usage(),
 			'model'         => $model,
 			'stop_reason'   => 'dry_run',
-			'image'         => $image['meta'],
+			'image'         => $image ? $image['meta'] : [ 'source' => 'none', 'media_type' => '', 'bytes' => 0 ],
+			'weights'       => $weights,
 			'request'       => $preview,
 		];
 	}
@@ -475,8 +577,133 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'usage'         => ism_ai_usage( $response ),
 		'model'         => (string) ( $response['model'] ?? $model ),
 		'stop_reason'   => (string) ( $response['stop_reason'] ?? '' ),
-		'image'         => $image['meta'],
+		'image'         => $image ? $image['meta'] : [ 'source' => 'none', 'media_type' => '', 'bytes' => 0 ],
+		'weights'       => $weights,
 	];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Weighting
+//
+// A percentage cannot literally steer how much attention a model pays to one
+// part of a prompt, and pretending otherwise would be dressing a guess up as a
+// dial. These do two things that are real:
+//
+//   1. A source at 0 is omitted from the request entirely. No image block, no
+//      page context, no existing metadata, no extra instruction. That is a
+//      mechanical change with a measurable effect on both output and cost.
+//   2. The remaining shares are turned into an explicit instruction telling the
+//      model which source to trust when they disagree, which is the question
+//      weighting is actually trying to answer.
+//
+// So the numbers are honest as priorities and as an on/off switch, and the
+// admin screen says so rather than implying calibrated attention control.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The four inputs a generation can draw on, and their default shares. */
+function ism_ai_default_weights(): array {
+	return [
+		'image'    => 50,
+		'prompt'   => 0,
+		'context'  => 25,
+		'metadata' => 25,
+	];
+}
+
+/** Human labels, used in the prompt and the admin screen. */
+function ism_ai_weight_labels(): array {
+	return [
+		'image'    => 'what is visible in the image itself',
+		'prompt'   => 'the instructions and keywords supplied by the site owner',
+		'context'  => 'the pages this image appears on',
+		'metadata' => 'the metadata already stored on this image',
+	];
+}
+
+/**
+ * Normalise a submitted weight set.
+ *
+ * Missing keys fall back to the default; values are clamped to 0-100. The
+ * sum is *not* forced to 100 here — the admin screen refuses to submit an
+ * invalid set, and silently rescaling behind someone's back would hide a
+ * mistake rather than surface it.
+ *
+ * @param array $weights
+ * @return array<string,int>
+ */
+function ism_ai_normalise_weights( array $weights ): array {
+	$out = [];
+
+	foreach ( ism_ai_default_weights() as $key => $default ) {
+		$value       = isset( $weights[ $key ] ) ? (int) $weights[ $key ] : $default;
+		$out[ $key ] = max( 0, min( 100, $value ) );
+	}
+
+	return $out;
+}
+
+/**
+ * The weights this site generates with, unless a run overrides them.
+ *
+ * @return array<string,int>
+ */
+function ism_ai_get_weights(): array {
+	$settings = ism_get_settings();
+	$stored   = (array) ( $settings['ai_weights'] ?? [] );
+
+	return empty( $stored ) ? ism_ai_default_weights() : ism_ai_normalise_weights( $stored );
+}
+
+/**
+ * The standing extra instruction, unless a run overrides it.
+ *
+ * @return string
+ */
+function ism_ai_get_extra_prompt(): string {
+	$settings = ism_get_settings();
+
+	return trim( (string) ( $settings['ai_extra_prompt'] ?? '' ) );
+}
+
+/**
+ * Turn a weight set into an instruction about which source wins a disagreement.
+ *
+ * @param array<string,int> $weights
+ * @return string Empty when there is nothing useful to say.
+ */
+function ism_ai_render_weighting( array $weights ): string {
+	$labels = ism_ai_weight_labels();
+
+	$used = array_filter( $weights, function ( $w ) {
+		return $w > 0;
+	} );
+
+	if ( count( $used ) < 2 ) {
+		return '';
+	}
+
+	arsort( $used );
+
+	$lines   = [];
+	$ordered = array_keys( $used );
+
+	foreach ( $ordered as $key ) {
+		$share = $used[ $key ];
+
+		if ( $share >= 60 ) {
+			$how = 'This is your primary source. Where sources disagree, follow this one.';
+		} elseif ( $share >= 35 ) {
+			$how = 'Treat this as a major input.';
+		} elseif ( $share >= 15 ) {
+			$how = 'Treat this as supporting detail.';
+		} else {
+			$how = 'Use this only as a light cross-check.';
+		}
+
+		$lines[] = sprintf( '- %s (%d%%). %s', $labels[ $key ], $share, $how );
+	}
+
+	return "How to weigh what you have been given:\n" . implode( "\n", $lines );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

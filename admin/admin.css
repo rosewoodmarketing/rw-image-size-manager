@@ -768,3 +768,41 @@
 
 .ism-key-actions .button-link-delete { padding-left: 0; }
 .ism-key-remove-status { margin-left: 8px; }
+
+/* ── Advanced AI settings ───────────────────────────────────────────────── */
+
+.ism-advanced-panel {
+	border: 1px solid #dcdcde;
+	border-left: 3px solid #2271b1;
+	border-radius: 4px;
+	padding: 4px 16px 8px;
+	margin-top: 8px;
+	background: #fbfbfc;
+}
+.ism-advanced-explainer { max-width: 70ch; margin-top: 14px; }
+.ism-advanced-caret { display: inline-block; margin-left: 4px; }
+
+.ism-weights { border-collapse: collapse; }
+.ism-weights td { padding: 6px 10px 6px 0; vertical-align: middle; }
+.ism-weight-label { max-width: 42ch; }
+.ism-weight-label label { font-weight: 600; display: block; }
+.ism-weight-label .description { display: block; margin-top: 1px; }
+.ism-weight-input { white-space: nowrap; }
+.ism-weight-range { width: 160px; vertical-align: middle; margin-right: 8px; }
+
+.ism-weight-total-row td { border-top: 1px solid #dcdcde; padding-top: 10px; }
+.ism-weight-total { font-size: 15px; }
+.ism-weight-bad .ism-weight-total { color: #b32d2e; }
+.ism-weight-error { color: #b32d2e; margin-left: 10px; font-weight: 500; }
+
+.ism-seo-estimate {
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 10px 14px;
+	margin: 12px 0;
+}
+.ism-estimate-head { font-size: 14px; }
+.ism-seo-estimate p { margin: 6px 0 0; }
+.ism-estimate-warn { color: #8a5700; font-weight: 500; }
+.ism-estimate-blocked { color: #b32d2e; font-weight: 500; margin: 0; }

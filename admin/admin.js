@@ -1135,6 +1135,7 @@
 			// rather than discarding work that has already been paid for.
 			seoProposals = res.data.results || {};
 			seoHasKey    = !! res.data.has_key;
+			seoSyncWeights();
 
 			if ( ! res.data.index_built ) {
 				$( '#ism-seo-scan-status' ).text( 'The usage index has not been built — every image will look unused. Build it first.' );
@@ -1396,6 +1397,7 @@
 
 		$( '.ism-seo-chart-count' ).text( vis.length + ' shown · ' + checked + ' ticked' );
 		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' ticked)' : '(none ticked yet)' );
+		seoRenderEstimate();
 
 		if ( ! vis.length ) {
 			$( '#ism-seo-chart' ).html( '<p class="description">Nothing matches this filter.</p>' );
@@ -1484,6 +1486,7 @@
 		var checked = Object.keys( seoChecked ).length;
 		$( '.ism-seo-chart-count' ).text( seoVisibleGroups().length + ' shown · ' + checked + ' ticked' );
 		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' ticked)' : '(none ticked yet)' );
+		seoRenderEstimate();
 	} );
 
 	$( document ).on( 'click', '#ism-seo-check-all', function () {
@@ -1547,7 +1550,9 @@
 			seoPost( 'ism_seo_generate', {
 				attachment_id:  id,
 				image_data_url: dataUrl || '',
-				override_skip:  override ? 1 : 0
+				override_skip:  override ? 1 : 0,
+				weights:        seoWeights(),
+				extra_prompt:   $( '#ism-ai-extra-prompt' ).val() || ''
 			}, function ( res ) {
 				if ( res.success ) {
 					seoProposals[ String( id ) ] = res.data.proposal;
@@ -1625,6 +1630,10 @@
 	}
 
 	$( document ).on( 'click', '#ism-seo-generate-start', function () {
+		if ( ! seoWeightsValid() ) {
+			window.alert( 'Source weights total ' + seoWeightTotal() + '%. They must total 100% before generating.' );
+			return;
+		}
 		var mode  = $( 'input[name="ism_seo_mode"]:checked' ).val();
 		var queue;
 
@@ -1762,6 +1771,174 @@
 			$( '.ism-key-remove-status' ).text( 'Request failed.' );
 		} );
 	} );
+
+	// ── Advanced AI settings ────────────────────────────────────────────────
+	//
+	// Weights are read from the DOM at Generate time, not from saved settings,
+	// so they can be adjusted immediately before a run. "Save as default" only
+	// decides what the boxes start at next visit.
+
+	function seoWeights() {
+		var w = {};
+		$( '.ism-weight-number' ).each( function () {
+			w[ $( this ).data( 'weight' ) ] = parseInt( $( this ).val(), 10 ) || 0;
+		} );
+		return w;
+	}
+
+	function seoWeightTotal() {
+		var t = 0;
+		$.each( seoWeights(), function ( k, v ) { t += v; } );
+		return t;
+	}
+
+	function seoWeightsValid() {
+		return seoWeightTotal() === 100;
+	}
+
+	function seoSyncWeights() {
+		var total = seoWeightTotal();
+		$( '.ism-weight-total' ).text( total );
+
+		var bad = total !== 100;
+		$( '.ism-weight-total-row' ).toggleClass( 'ism-weight-bad', bad );
+		$( '.ism-weight-error' ).text( bad
+			? ( total > 100 ? 'Over by ' + ( total - 100 ) + '% — must total 100%.'
+			                : 'Short by ' + ( 100 - total ) + '% — must total 100%.' )
+			: '' );
+
+		// Generation is blocked rather than quietly rescaled, so a mistake is
+		// visible before it costs anything.
+		$( '#ism-seo-generate-start' ).prop( 'disabled', bad || ! seoHasKey );
+
+		seoRenderEstimate();
+	}
+
+	$( document ).on( 'click', '#ism-advanced-toggle', function () {
+		var $p = $( '#ism-advanced-panel' );
+		var open = $p.is( '[hidden]' );
+		$p.attr( 'hidden', ! open ? 'hidden' : null );
+		$( this ).attr( 'aria-expanded', open ? 'true' : 'false' )
+			.find( '.ism-advanced-caret' ).text( open ? '▾' : '▸' );
+		if ( open ) { seoSyncWeights(); }
+	} );
+
+	// The slider and the number box are two views of one value.
+	$( document ).on( 'input change', '.ism-weight-range', function () {
+		var k = $( this ).data( 'weight' );
+		$( '.ism-weight-number[data-weight="' + k + '"]' ).val( $( this ).val() );
+		seoSyncWeights();
+	} );
+	$( document ).on( 'input change', '.ism-weight-number', function () {
+		var k = $( this ).data( 'weight' );
+		$( '.ism-weight-range[data-weight="' + k + '"]' ).val( $( this ).val() );
+		seoSyncWeights();
+	} );
+	$( document ).on( 'input', '#ism-ai-extra-prompt', function () {
+		clearTimeout( window.ismPromptTimer );
+		window.ismPromptTimer = setTimeout( seoRenderEstimate, 200 );
+	} );
+
+	$( document ).on( 'click', '#ism-advanced-reset', function () {
+		var d = { image: 50, prompt: 0, context: 25, metadata: 25 };
+		$.each( d, function ( k, v ) {
+			$( '.ism-weight-number[data-weight="' + k + '"], .ism-weight-range[data-weight="' + k + '"]' ).val( v );
+		} );
+		seoSyncWeights();
+	} );
+
+	$( document ).on( 'click', '#ism-advanced-save', function () {
+		if ( ! seoWeightsValid() ) {
+			$( '.ism-advanced-save-status' ).text( 'Fix the total first.' );
+			return;
+		}
+		var $btn = $( this ).prop( 'disabled', true );
+		$( '.ism-advanced-save-status' ).text( 'Saving…' );
+		seoPost( 'ism_seo_save_advanced', {
+			weights:      seoWeights(),
+			extra_prompt: $( '#ism-ai-extra-prompt' ).val() || ''
+		}, function ( res ) {
+			$btn.prop( 'disabled', false );
+			$( '.ism-advanced-save-status' ).text( res.success ? 'Saved as default.' : ( res.data || 'Could not save.' ) );
+		}, function () {
+			$btn.prop( 'disabled', false );
+			$( '.ism-advanced-save-status' ).text( 'Request failed.' );
+		} );
+	} );
+
+	// ── Cost estimate ───────────────────────────────────────────────────────
+	//
+	// Mirrors ism_ai_estimate_tokens(). Component figures come from measured
+	// runs, but page text and reply length vary per image, so it is labelled
+	// approximate rather than presented as a quote.
+
+	var SEO_PRICES = {
+		'claude-haiku-4-5': { in: 1, out: 5 },
+		'claude-sonnet-5':  { in: 3, out: 15 },
+		'claude-opus-5':    { in: 5, out: 25 },
+		'claude-opus-4-8':  { in: 5, out: 25 }
+	};
+
+	function seoQueueSize() {
+		var mode = $( 'input[name="ism_seo_mode"]:checked' ).val();
+		if ( mode === 'selected' ) {
+			return seoGroups.filter( function ( g ) { return seoChecked[ g.key ]; } ).length;
+		}
+		var limit = Math.max( 1, parseInt( $( '#ism-seo-limit' ).val(), 10 ) || 20 );
+		return Math.min( limit, seoGroups.filter( function ( g ) {
+			return g.group === 'ready' && ! seoGroupProposal( g );
+		} ).length );
+	}
+
+	function seoRenderEstimate() {
+		var $box = $( '#ism-seo-estimate' );
+		if ( ! $box.length ) { return; }
+
+		var w      = seoWeights();
+		var model  = $( '#ism-ai-model' ).val() || 'claude-haiku-4-5';
+		var price  = SEO_PRICES[ model ] || SEO_PRICES[ 'claude-haiku-4-5' ];
+		var chars  = parseInt( $( '#ism-context-max-chars' ).val(), 10 ) || 1000;
+		var extra  = ( $( '#ism-ai-extra-prompt' ).val() || '' ).length;
+		var n      = seoQueueSize();
+
+		var input = 340;
+		var parts = [];
+		if ( w.image > 0 )    { input += 130; parts.push( 'image' ); }
+		if ( w.context > 0 )  { input += Math.ceil( chars / 4 ) + 60; parts.push( 'page context' ); }
+		if ( w.metadata > 0 ) { input += 60; parts.push( 'existing metadata' ); }
+		if ( w.prompt > 0 && extra > 0 ) { input += Math.ceil( extra / 4 ); parts.push( 'your instructions' ); }
+
+		var active = 0;
+		$.each( w, function ( k, v ) { if ( v > 0 ) { active++; } } );
+		if ( active > 1 ) { input += 25 * active; }
+
+		var output    = 150;
+		var perImage  = ( input * price.in / 1e6 ) + ( output * price.out / 1e6 );
+		var total     = perImage * n;
+
+		if ( ! seoWeightsValid() ) {
+			$box.html( '<p class="ism-estimate-blocked">Weights total ' + seoWeightTotal()
+				+ '%. Generation is disabled until they total 100%.</p>' ).show();
+			return;
+		}
+
+		if ( ! n ) {
+			$box.html( '<p class="description">Nothing queued yet — tick images in the chart, or switch to the first-N option.</p>' ).show();
+			return;
+		}
+
+		$box.html(
+			'<div class="ism-estimate-head"><strong>' + n + '</strong> image' + ( n === 1 ? '' : 's' )
+			+ ' · approx <strong>$' + total.toFixed( total < 1 ? 3 : 2 ) + '</strong> total'
+			+ ' <span class="description">(about $' + perImage.toFixed( 4 ) + ' each)</span></div>'
+			+ '<p class="description">Sending ' + ( parts.length ? parts.join( ', ' ) : 'the instructions only' )
+			+ ' — roughly ' + input.toLocaleString() + ' tokens in and ' + output + ' out per image, at '
+			+ esc( model ) + ' rates. Page text varies per image, so treat this as a ballpark, not a quote.</p>'
+			+ ( w.image === 0 ? '<p class="ism-estimate-warn">The image itself is weighted 0%, so nothing will actually look at the picture. Output will be inferred from text alone.</p>' : '' )
+		).show();
+	}
+
+	$( document ).on( 'change', 'input[name="ism_seo_mode"], #ism-seo-limit, #ism-ai-model, #ism-context-max-chars', seoRenderEstimate );
 
 	// Model note follows the dropdown.
 	$( document ).on( 'change', '#ism-ai-model', function () {

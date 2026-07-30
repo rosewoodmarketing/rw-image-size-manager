@@ -576,6 +576,87 @@ if ( ! defined( 'ABSPATH' ) ) {
 						</td>
 					</tr>
 				</table>
+
+				<p>
+					<button type="button" class="button" id="ism-advanced-toggle" aria-expanded="false">
+						<?php esc_html_e( 'Advanced AI settings', 'image-size-manager' ); ?>
+						<span class="ism-advanced-caret">▸</span>
+					</button>
+				</p>
+
+				<?php
+				$ism_weights = ism_ai_get_weights();
+				$ism_labels  = [
+					'image'    => __( 'Looking at the image itself', 'image-size-manager' ),
+					'prompt'   => __( 'Your instructions and keywords', 'image-size-manager' ),
+					'context'  => __( 'The pages the image appears on', 'image-size-manager' ),
+					'metadata' => __( 'Existing title, alt text and caption', 'image-size-manager' ),
+				];
+				$ism_hints = [
+					'image'    => __( 'What is actually visible. Set to 0 to describe without looking — much cheaper, and usually much worse.', 'image-size-manager' ),
+					'prompt'   => __( 'Only counts if you write something below. 0 ignores it entirely.', 'image-size-manager' ),
+					'context'  => __( 'Page titles, keywords and body copy from every page using this image.', 'image-size-manager' ),
+					'metadata' => __( 'Lets generation improve on what is there rather than ignore it.', 'image-size-manager' ),
+				];
+				?>
+				<div id="ism-advanced-panel" class="ism-advanced-panel" hidden>
+
+					<p class="description ism-advanced-explainer">
+						<?php esc_html_e( 'These percentages do two things. A source set to 0 is left out of the request completely — no image sent, no page context, no existing metadata. The remaining shares are turned into an explicit instruction telling the model which source to trust when they disagree. They are priorities and an on/off switch, not a calibrated attention dial.', 'image-size-manager' ); ?>
+					</p>
+
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Extra instructions', 'image-size-manager' ); ?></th>
+							<td>
+								<textarea name="ism_ai_extra_prompt" id="ism-ai-extra-prompt" rows="4" class="large-text"
+									placeholder="<?php esc_attr_e( 'e.g. This is a metal roofing supplier. Prefer product names like Standing Seam, Board &amp; Batten, 5-V Crimp. Never guess a colour name you cannot clearly see.', 'image-size-manager' ); ?>"><?php echo esc_textarea( ism_ai_get_extra_prompt() ); ?></textarea>
+								<p class="description">
+									<?php esc_html_e( 'Added to every request, after the page context. Good for house vocabulary, product naming, or things the model keeps getting wrong. Leave blank to send nothing.', 'image-size-manager' ); ?>
+								</p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Source weighting', 'image-size-manager' ); ?></th>
+							<td>
+								<table class="ism-weights">
+									<?php foreach ( $ism_weights as $ism_wk => $ism_wv ) : ?>
+									<tr>
+										<td class="ism-weight-label">
+											<label for="ism-weight-<?php echo esc_attr( $ism_wk ); ?>"><?php echo esc_html( $ism_labels[ $ism_wk ] ); ?></label>
+											<span class="description"><?php echo esc_html( $ism_hints[ $ism_wk ] ); ?></span>
+										</td>
+										<td class="ism-weight-input">
+											<input type="range" class="ism-weight-range" data-weight="<?php echo esc_attr( $ism_wk ); ?>"
+												min="0" max="100" step="5" value="<?php echo esc_attr( (string) $ism_wv ); ?>" />
+											<input type="number" class="small-text ism-weight-number"
+												id="ism-weight-<?php echo esc_attr( $ism_wk ); ?>"
+												name="ism_ai_weights[<?php echo esc_attr( $ism_wk ); ?>]"
+												data-weight="<?php echo esc_attr( $ism_wk ); ?>"
+												min="0" max="100" value="<?php echo esc_attr( (string) $ism_wv ); ?>" />%
+										</td>
+									</tr>
+									<?php endforeach; ?>
+									<tr class="ism-weight-total-row">
+										<td class="ism-weight-label"><strong><?php esc_html_e( 'Total', 'image-size-manager' ); ?></strong></td>
+										<td class="ism-weight-input">
+											<strong class="ism-weight-total">100</strong>%
+											<span class="ism-weight-error" role="alert"></span>
+										</td>
+									</tr>
+								</table>
+								<p>
+									<button type="button" class="button" id="ism-advanced-reset"><?php esc_html_e( 'Reset to defaults', 'image-size-manager' ); ?></button>
+									<button type="button" class="button" id="ism-advanced-save"><?php esc_html_e( 'Save as default', 'image-size-manager' ); ?></button>
+									<span class="ism-advanced-save-status description"></span>
+								</p>
+								<p class="description">
+									<?php esc_html_e( 'Changes apply to the next Generate immediately. Saving only decides what these boxes start at next visit.', 'image-size-manager' ); ?>
+								</p>
+							</td>
+						</tr>
+					</table>
+				</div>
 			</div>
 
 			<!-- Usage index ─────────────────────────────────────────────── -->
@@ -702,6 +783,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 						<?php esc_html_e( 'Start small on a new site and read the output before scaling up.', 'image-size-manager' ); ?>
 					</span>
 				</p>
+
+				<div class="ism-seo-estimate" id="ism-seo-estimate"></div>
 
 				<div class="ism-regen-controls">
 					<button type="button" class="button button-primary" id="ism-seo-generate-start" <?php disabled( ! $ism_has_key ); ?>>

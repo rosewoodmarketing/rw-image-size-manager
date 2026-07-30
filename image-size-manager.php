@@ -99,6 +99,7 @@ add_action( 'wp_ajax_ism_seo_reset',      'ism_ajax_seo_reset' );
 add_action( 'wp_ajax_ism_hash_batch',     'ism_ajax_hash_batch' );
 add_action( 'wp_ajax_ism_seo_review',     'ism_ajax_seo_review' );
 add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
+add_action( 'wp_ajax_ism_seo_save_advanced', 'ism_ajax_seo_save_advanced' );
 
 // AJAX: usage index build (Image SEO tab depends on it)
 add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );
@@ -957,6 +958,14 @@ function ism_handle_save(): void {
 	// Clamped rather than rejected: a silly number should land somewhere sane,
 	// not fail the whole save.
 	$settings['context_max_chars'] = min( 20000, max( 100, (int) ( $_POST['ism_context_max_chars'] ?? ISM_CONTEXT_MAX_CHARS ) ) );
+
+	// ── Advanced generation settings ────────────────────────────────────────
+	$settings['ai_extra_prompt'] = sanitize_textarea_field( wp_unslash( $_POST['ism_ai_extra_prompt'] ?? '' ) );
+
+	$submitted_weights = (array) ( $_POST['ism_ai_weights'] ?? [] );
+	if ( ! empty( $submitted_weights ) ) {
+		$settings['ai_weights'] = ism_ai_normalise_weights( array_map( 'intval', $submitted_weights ) );
+	}
 
 	// ── Anthropic API key ────────────────────────────────────────────────────
 	// Stored by ism_ai_set_key() in its own option with autoload off, never in
