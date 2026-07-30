@@ -28,6 +28,8 @@ define( 'ISM_GITHUB_REPO', 'rw-image-size-manager' );
 require_once ISM_PLUGIN_DIR . 'includes/class-ism-github-updater.php';
 require_once ISM_PLUGIN_DIR . 'includes/ajax-handlers.php';
 require_once ISM_PLUGIN_DIR . 'includes/usage-index.php';
+require_once ISM_PLUGIN_DIR . 'includes/context-builder.php';
+require_once ISM_PLUGIN_DIR . 'includes/image-source.php';
 
 if ( is_admin() ) {
 	new ISM_GitHub_Updater( __FILE__, ISM_GITHUB_USER, ISM_GITHUB_REPO );

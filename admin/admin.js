@@ -866,4 +866,128 @@
 		} );
 	}() );
 
+	// ── Vision image conversion (browser fallback) ──────────────────────────
+	//
+	// Some hosts cannot decode every image format the media library holds. AVIF
+	// is the case that forced this: a container whose ImageMagick predates the
+	// format and whose libgd was built without libavif can read none of it,
+	// while reporting through gd_info() that it can. On such a host
+	// ism_vision_source() returns ism_vision_client_decode and the work lands
+	// here instead.
+	//
+	// Browsers decode AVIF natively, so a canvas round-trip converts to JPEG
+	// with nothing required of the server. The result posts back and is
+	// re-validated by ism_vision_accept_client_image() before it goes anywhere.
+
+	// Keep in step with ISM_VISION_MAX_EDGE and ISM_VISION_JPEG_QUALITY.
+	var VISION_MAX_EDGE = 1024;
+	var VISION_QUALITY  = 0.82;
+
+	// Whether this browser can do the conversion at all.
+	function visionCanConvert() {
+		var canvas = document.createElement( 'canvas' );
+		return !! ( canvas.getContext && canvas.getContext( '2d' ) && canvas.toDataURL );
+	}
+
+	// Draw a loaded image onto a white canvas and read it back as JPEG.
+	// Separate from the loading step so the retry below can reuse it.
+	function visionCanvasToJpeg( img ) {
+		var width  = img.naturalWidth  || img.width;
+		var height = img.naturalHeight || img.height;
+
+		if ( ! width || ! height ) {
+			return null;
+		}
+
+		var scale = Math.min( 1, VISION_MAX_EDGE / Math.max( width, height ) );
+		var canvas = document.createElement( 'canvas' );
+		canvas.width  = Math.round( width  * scale );
+		canvas.height = Math.round( height * scale );
+
+		var ctx = canvas.getContext( '2d' );
+
+		// JPEG has no alpha, so anything transparent encodes as black unless it
+		// is composited first. Matches the flatten-onto-white the PHP path does.
+		ctx.fillStyle = '#ffffff';
+		ctx.fillRect( 0, 0, canvas.width, canvas.height );
+		ctx.drawImage( img, 0, 0, canvas.width, canvas.height );
+
+		return canvas.toDataURL( 'image/jpeg', VISION_QUALITY );
+	}
+
+	/**
+	 * Convert an image URL to a JPEG data URL.
+	 *
+	 * @param {string}   url      Same-origin uploads URL, from ism_vision_client_url().
+	 * @param {Function} onDone   Called as onDone( dataUrl, errorMessage ).
+	 */
+	function visionConvert( url, onDone ) {
+		if ( ! visionCanConvert() ) {
+			onDone( null, 'This browser cannot convert images. Use a current Chrome, Firefox or Safari.' );
+			return;
+		}
+
+		// Two passes. The first is plain, which is what same-origin uploads need
+		// and what most sites will use. If the canvas comes back tainted the
+		// uploads are being served from another origin, so the second pass asks
+		// for CORS — which only helps if that origin sends the headers, but
+		// costs one request to find out.
+		var attemptedCors = false;
+
+		function attempt() {
+			var img = new Image();
+
+			if ( attemptedCors ) {
+				img.crossOrigin = 'anonymous';
+			}
+
+			img.onload = function () {
+				var dataUrl;
+
+				try {
+					dataUrl = visionCanvasToJpeg( img );
+				} catch ( e ) {
+					// SecurityError: cross-origin image tainted the canvas.
+					if ( ! attemptedCors ) {
+						attemptedCors = true;
+						attempt();
+						return;
+					}
+					onDone( null, 'Images are served from another domain without CORS headers, so the browser cannot convert them.' );
+					return;
+				}
+
+				if ( ! dataUrl ) {
+					onDone( null, 'Image loaded with no dimensions.' );
+					return;
+				}
+
+				onDone( dataUrl, null );
+			};
+
+			img.onerror = function () {
+				if ( ! attemptedCors ) {
+					attemptedCors = true;
+					attempt();
+					return;
+				}
+				onDone( null, 'Could not load the image. The file may be missing, or the format unsupported by this browser.' );
+			};
+
+			// Cache-bust nothing: a warm cache is desirable across a long run.
+			img.src = url;
+		}
+
+		attempt();
+	}
+
+	// Exposed so the Image SEO tab can call it, and so a single conversion can
+	// be tried from the console when tuning against one known image.
+	window.ismVision = {
+		convert:    visionConvert,
+		canConvert: visionCanConvert,
+		maxEdge:    VISION_MAX_EDGE,
+		quality:    VISION_QUALITY
+	};
+
 } )( jQuery );
