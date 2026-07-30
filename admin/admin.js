@@ -2264,8 +2264,13 @@
 			+ '<div class="ism-broken-what">' + what + ' ' + name + '</div>'
 			+ '<div class="description">'
 			+ esc( brokenSourceLabel( r ) ) + ' · <code>' + esc( r.field ) + '</code> · on '
-			+ '<a href="' + esc( ismData.adminUrl + 'post.php?post=' + r.post_id + '&action=edit' ) + '" target="_blank">'
-			+ esc( r.post_title ) + '</a> <span class="description">(' + esc( r.post_type ) + ')</span>'
+			// The live page, so clicking through shows whether anything is
+			// actually broken. The editor stays reachable as a separate link.
+			+ ( r.permalink
+				? '<a href="' + esc( r.permalink ) + '" target="_blank">' + esc( r.post_title ) + '</a>'
+				: esc( r.post_title ) )
+			+ ' <span class="description">(' + esc( r.post_type ) + ')</span>'
+			+ ' <a href="' + esc( ismData.adminUrl + 'post.php?post=' + r.post_id + '&action=edit' ) + '" target="_blank" class="ism-broken-editlink">edit</a>'
 			+ '</div>'
 			+ ( r.url ? '<div class="ism-broken-url" title="' + esc( r.url ) + '">' + esc( r.url ) + '</div>' : '' )
 			+ '</div>'
