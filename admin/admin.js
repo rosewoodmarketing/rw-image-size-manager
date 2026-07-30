@@ -1331,6 +1331,7 @@
 			var inner = p.link ? '<a href="' + esc( p.link ) + '" target="_blank">' + label + '</a>' : label;
 			out.push( '<span class="' + cls + '" title="' + esc( tip ) + '">' + inner
 				+ '<em>' + esc( p.type ) + ( p.featured ? ' · featured' : '' )
+				+ ( p.edit ? ' · <a href="' + esc( p.edit ) + '" target="_blank">edit</a>' : '' )
 				+ ( p.link ? '' : ' · not linkable' ) + '</em></span>' );
 		} );
 		return out.join( '' );
@@ -2210,6 +2211,8 @@
 			if ( filter === 'recoverable'   && ! r.recoverable ) { return false; }
 			if ( filter === 'unrecoverable' && r.recoverable ) { return false; }
 			if ( filter === 'chosen'        && ! brokenChoices[ r.key ] ) { return false; }
+			if ( filter === 'visible'       && r.severity !== 'likely_visible' ) { return false; }
+			if ( filter === 'harmless'      && r.severity === 'likely_visible' ) { return false; }
 
 			if ( term ) {
 				var hay = ( r.filename + ' ' + r.post_title + ' ' + r.field + ' ' + r.ref ).toLowerCase();
@@ -2233,6 +2236,15 @@
 		var what = r.type === 'stale_id'
 			? '<span class="ism-badge ism-badge-failed">attachment #' + esc( r.ref ) + ' deleted</span>'
 			: '<span class="ism-badge ism-badge-noalt">file missing</span>';
+
+		var sev = {
+			likely_visible: [ 'ism-sev-visible', 'probably visible' ],
+			renders_ok:     [ 'ism-sev-ok', 'renders fine — stale reference only' ],
+			responsive:     [ 'ism-sev-minor', 'tablet/mobile only' ],
+			template:       [ 'ism-sev-minor', 'on a saved template' ]
+		}[ r.severity ] || [ 'ism-sev-minor', 'unknown' ];
+
+		what += ' <span class="ism-badge ' + sev[ 0 ] + '">' + esc( sev[ 1 ] ) + '</span>';
 
 		var name = r.recoverable
 			? '<code>' + esc( r.filename ) + '</code>'
@@ -2262,11 +2274,13 @@
 			+ ( r.recoverable
 				? '<button type="button" class="button button-small ism-broken-find" data-key="' + esc( r.key ) + '" data-filename="' + esc( r.filename ) + '">Suggest matches</button> '
 				: '' )
+			+ '<button type="button" class="button button-small ism-broken-verify" data-key="' + esc( r.key ) + '">Is it actually broken?</button> '
 			+ '<button type="button" class="button button-small ism-broken-pick" data-key="' + esc( r.key ) + '">Choose from media library…</button>'
 			+ ( chosen
 				? ' <button type="button" class="button button-small button-primary ism-broken-preview" data-key="' + esc( r.key ) + '" data-id="' + chosen.id + '">Preview the fix</button>'
 				: '' )
 			+ '</div>'
+			+ '<div class="ism-broken-verdict"></div>'
 			+ '<div class="ism-broken-suggestions"></div>'
 			+ '<div class="ism-broken-preview-box"></div>'
 			+ '</div>';
@@ -2283,7 +2297,7 @@
 			if ( ! by[ r.post_id ] ) {
 				by[ r.post_id ] = {
 					post_id: r.post_id, title: r.post_title, type: r.post_type,
-					refs: [], chosen: 0
+					permalink: r.permalink || '', refs: [], chosen: 0
 				};
 			}
 			by[ r.post_id ].refs.push( r );
@@ -2307,7 +2321,8 @@
 			+ '</button>'
 			+ '<div class="ism-broken-page-body"' + ( open ? '' : ' hidden' ) + '>'
 			+ '<p class="ism-broken-page-links">'
-			+ '<a href="' + esc( ismData.adminUrl + 'post.php?post=' + p.post_id + '&action=edit' ) + '" target="_blank">Edit this page →</a>'
+			+ ( p.permalink ? '<a href="' + esc( p.permalink ) + '" target="_blank">View the live page →</a> ' : '' )
+			+ '<a href="' + esc( ismData.adminUrl + 'post.php?post=' + p.post_id + '&action=edit' ) + '" target="_blank" class="ism-broken-editlink">edit</a>'
 			+ '</p>'
 			+ p.refs.map( brokenRowHtml ).join( '' )
 			+ '</div></div>';
@@ -2341,6 +2356,19 @@
 	}
 
 	var brokenOpenPages = {};
+
+	$( document ).on( 'change', '#ism-broken-filter', function () {
+		brokenPage = 1;
+		brokenRenderList();
+	} );
+
+	$( document ).on( 'input', '#ism-broken-search', function () {
+		clearTimeout( window.ismBrokenTimer );
+		window.ismBrokenTimer = setTimeout( function () { brokenPage = 1; brokenRenderList(); }, 250 );
+	} );
+
+	$( document ).on( 'click', '.ism-broken-prev', function () { brokenPage--; brokenRenderList(); } );
+	$( document ).on( 'click', '.ism-broken-next', function () { brokenPage++; brokenRenderList(); } );
 
 	$( document ).on( 'click', '.ism-broken-page-head', function () {
 		var id = String( $( this ).data( 'post' ) );
@@ -2415,6 +2443,36 @@
 
 	$( document ).on( 'click', '.ism-broken-clear', function () {
 		brokenSaveChoice( String( $( this ).data( 'key' ) ), 0 );
+	} );
+
+	// Detection reasons about where a reference sits; only the rendered page
+	// settles whether anyone actually sees a hole. This fetches it and looks.
+	$( document ).on( 'click', '.ism-broken-verify', function () {
+		var $btn = $( this );
+		var $box = $btn.closest( '.ism-broken-row' ).find( '.ism-broken-verdict' );
+
+		$btn.prop( 'disabled', true ).text( 'Loading the page…' );
+
+		seoPost( 'ism_broken_verify', { key: String( $btn.data( 'key' ) ) }, function ( res ) {
+			$btn.prop( 'disabled', false ).text( 'Is it actually broken?' );
+
+			if ( ! res.success ) {
+				$box.html( '<p class="ism-repoint-error">' + esc( res.data || 'Could not check.' ) + '</p>' );
+				return;
+			}
+
+			var d   = res.data;
+			var cls = ! d.checked ? 'ism-verdict-unknown' : ( d.found ? 'ism-verdict-broken' : 'ism-verdict-fine' );
+			var tag = ! d.checked ? 'Could not check' : ( d.found ? 'Visitors see this break' : 'Not on the rendered page' );
+
+			$box.html( '<div class="ism-broken-verdict-box ' + cls + '">'
+				+ '<strong>' + esc( tag ) + '</strong> ' + esc( d.message )
+				+ ( d.url ? ' <a href="' + esc( d.url ) + '" target="_blank">Open it →</a>' : '' )
+				+ '</div>' );
+		}, function () {
+			$btn.prop( 'disabled', false ).text( 'Is it actually broken?' );
+			$box.html( '<p class="ism-repoint-error">Request failed.</p>' );
+		} );
 	} );
 
 	// ── Preview and repoint ─────────────────────────────────────────────────

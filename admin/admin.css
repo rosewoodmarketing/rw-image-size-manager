@@ -1015,3 +1015,24 @@
 .ism-repoint-to { color: #1d7e2d; }
 .ism-repoint-arrow { color: #787c82; width: 18px; text-align: center; }
 .ism-repoint-error { color: #b32d2e; font-weight: 500; margin: 8px 0 0; }
+
+/* ── Broken images: severity and live verdict ───────────────────────────── */
+
+.ism-broken-triage { border-left-color: #b32d2e; background: #fcf7f7; }
+.ism-broken-editlink { font-size: 12px; margin-left: 6px; }
+
+.ism-sev-visible { background: #fce8e8; color: #a32c2c; }
+.ism-sev-ok      { background: #e3f5e6; color: #1d7e2d; }
+.ism-sev-minor   { background: #f0f0f1; color: #50575e; }
+
+.ism-broken-verdict:empty { display: none; }
+.ism-broken-verdict-box {
+	margin-top: 8px;
+	padding: 8px 11px;
+	border-radius: 3px;
+	font-size: 13px;
+	border-left: 3px solid;
+}
+.ism-verdict-broken  { background: #fcf0f1; border-color: #b32d2e; }
+.ism-verdict-fine    { background: #f0f7f1; border-color: #1d7e2d; }
+.ism-verdict-unknown { background: #f6f7f7; border-color: #a7aaad; }

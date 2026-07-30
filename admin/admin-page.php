@@ -740,6 +740,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 							<option value="dupes"><?php esc_html_e( 'Duplicates only', 'image-size-manager' ); ?></option>
 							<option value="skipped"><?php esc_html_e( 'Decorative / unsupported', 'image-size-manager' ); ?></option>
 							<option value="unused"><?php esc_html_e( 'Not found on any page', 'image-size-manager' ); ?></option>
+							<option value="visible"><?php esc_html_e( 'Probably visible to visitors', 'image-size-manager' ); ?></option>
+							<option value="harmless"><?php esc_html_e( 'Probably harmless leftovers', 'image-size-manager' ); ?></option>
 							<option value="all"><?php esc_html_e( 'Everything', 'image-size-manager' ); ?></option>
 						</select>
 					</label>
@@ -860,6 +862,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<p class="description">
 					<?php esc_html_e( 'References that point at an image which is no longer there. Two kinds: a reference to an attachment that has been deleted, and a reference to a file that is missing from disk. WordPress reports neither — the page just renders a gap.', 'image-size-manager' ); ?>
 				</p>
+				<p class="ism-broken-scope ism-broken-triage">
+					<strong><?php esc_html_e( 'Not every broken reference is a broken image.', 'image-size-manager' ); ?></strong>
+					<?php esc_html_e( 'Pages render the image URL, not the attachment ID, so a deleted attachment whose file is still on disk looks perfectly fine. References on saved templates may never render, and *_tablet or *_mobile variants only appear at those breakpoints. Each row is rated on that basis — and because the rating is a guess, every row has an "Is it actually broken?" button that loads the live page and tells you whether the file is really requested.', 'image-size-manager' ); ?>
+				</p>
 				<p class="ism-broken-scope">
 					<?php esc_html_e( 'This tab finds broken references and suggests replacements. It does not repair anything yet — repointing has to rewrite Elementor JSON and ACF fields correctly, and that is being built and tested separately. Picking a replacement here records the decision so the repair step can use it later.', 'image-size-manager' ); ?>
 				</p>
@@ -883,6 +889,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 					<label>
 						<?php esc_html_e( 'Show', 'image-size-manager' ); ?>
 						<select id="ism-broken-filter">
+							<option value="visible"><?php esc_html_e( 'Probably visible to visitors', 'image-size-manager' ); ?></option>
+							<option value="harmless"><?php esc_html_e( 'Probably harmless leftovers', 'image-size-manager' ); ?></option>
 							<option value="all"><?php esc_html_e( 'Everything', 'image-size-manager' ); ?></option>
 							<option value="stale_id"><?php esc_html_e( 'Deleted attachment', 'image-size-manager' ); ?></option>
 							<option value="missing_file"><?php esc_html_e( 'File missing from disk', 'image-size-manager' ); ?></option>

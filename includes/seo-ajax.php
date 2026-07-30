@@ -43,6 +43,16 @@ define( 'ISM_SEO_CACHE_KEY', 'ism_seo_scan_cache' );
 /** Marks an attachment as checked off by a human. */
 define( 'ISM_SEO_REVIEWED_META', '_ism_seo_reviewed' );
 
+/**
+ * Row-shape version.
+ *
+ * Bumped whenever ism_seo_row() gains or renames a field. A cache written by
+ * an older shape is discarded rather than served, because a missing field
+ * shows up as a silently absent link or badge rather than an error — which is
+ * exactly the kind of fault nobody reports.
+ */
+define( 'ISM_SEO_CACHE_VERSION', 2 );
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scan cache
 //
@@ -65,6 +75,10 @@ function ism_seo_cache_get(): ?array {
 		return null;
 	}
 
+	if ( (int) ( $cache['version'] ?? 0 ) !== ISM_SEO_CACHE_VERSION ) {
+		return null;
+	}
+
 	return [
 		'rows'       => (array) $cache['rows'],
 		'scanned_at' => (int) ( $cache['scanned_at'] ?? 0 ),
@@ -80,6 +94,7 @@ function ism_seo_cache_set( array $rows ): void {
 	update_option( ISM_SEO_CACHE_KEY, [
 		'rows'       => $rows,
 		'scanned_at' => time(),
+		'version'    => ISM_SEO_CACHE_VERSION,
 	], false );
 }
 
@@ -199,16 +214,19 @@ function ism_seo_row( int $attachment_id ): array {
 
 	$places = [];
 	foreach ( $usages as $usage ) {
-		// Not every place can be linked. A post whose type is no longer
+		// The live page first: clicking a place is nearly always "show me where
+		// this appears", not "let me edit it". The edit screen stays available
+		// as a separate small link.
+		//
+		// Not every place can be linked at all. A post whose type is no longer
 		// registered — content left behind by a removed plugin — has no edit
-		// screen, and a site-wide option has no URL at all. Fall back to the
-		// permalink, then to plain text with a reason, rather than rendering a
-		// dead link or silently dropping the row.
-		$link   = (string) $usage['edit_url'];
+		// screen, and a site-wide option has no URL. Fall back rather than
+		// rendering a dead link or dropping the row.
+		$link   = (string) $usage['permalink'];
 		$reason = '';
 
 		if ( $link === '' ) {
-			$link = (string) $usage['permalink'];
+			$link = (string) $usage['edit_url'];
 		}
 
 		if ( $link === '' ) {
@@ -225,6 +243,7 @@ function ism_seo_row( int $attachment_id ): array {
 			'source'   => (string) $usage['source'],
 			'featured' => $usage['source'] === 'featured',
 			'link'     => $link,
+			'edit'     => (string) $usage['edit_url'],
 			'reason'   => $reason,
 		];
 	}
@@ -715,6 +734,7 @@ function ism_seo_cache_touch( array $ids, callable $mutate ): void {
 		update_option( ISM_SEO_CACHE_KEY, [
 			'rows'       => $cache['rows'],
 			'scanned_at' => $cache['scanned_at'],
+			'version'    => ISM_SEO_CACHE_VERSION,
 		], false );
 	}
 }

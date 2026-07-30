@@ -113,6 +113,7 @@ add_action( 'wp_ajax_ism_broken_suggest', 'ism_ajax_broken_suggest' );
 add_action( 'wp_ajax_ism_broken_choose',  'ism_ajax_broken_choose' );
 add_action( 'wp_ajax_ism_repoint_preview', 'ism_ajax_repoint_preview' );
 add_action( 'wp_ajax_ism_repoint_apply',   'ism_ajax_repoint_apply' );
+add_action( 'wp_ajax_ism_broken_verify',   'ism_ajax_broken_verify' );
 
 // AJAX: usage index build (Image SEO tab depends on it)
 add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );

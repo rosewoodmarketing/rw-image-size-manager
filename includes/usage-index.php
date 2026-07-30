@@ -543,7 +543,7 @@ function ism_usage_attachment_maps(): array {
  * @param array              $elements Elements tree or settings subtree.
  * @param array<int,bool>   &$found    Collected attachment IDs, keyed by ID.
  */
-function ism_usage_walk_elementor( array $elements, array &$found, array &$urls = [] ): void {
+function ism_usage_walk_elementor( array $elements, array &$found, array &$urls = [], array &$keys = [], string $parent = '' ): void {
 	foreach ( $elements as $key => $value ) {
 		if ( ! is_array( $value ) ) {
 			continue;
@@ -561,11 +561,16 @@ function ism_usage_walk_elementor( array $elements, array &$found, array &$urls 
 				// from, so a stale Elementor reference is only recoverable at
 				// all because Elementor stored both.
 				$urls[ (int) $id ] = (string) $value['url'];
+
+				// The control this sits under decides whether it ever renders:
+				// a *_tablet variant only appears at that breakpoint, and a
+				// widget default is replaced by dynamic data at render time.
+				$keys[ (int) $id ] = is_string( $key ) ? $key : $parent;
 			}
 		}
 
 		// Recurse into everything: elements, settings, gallery arrays, repeaters.
-		ism_usage_walk_elementor( $value, $found, $urls );
+		ism_usage_walk_elementor( $value, $found, $urls, $keys, is_string( $key ) ? $key : $parent );
 	}
 }
 

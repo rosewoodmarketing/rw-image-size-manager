@@ -36,6 +36,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 /** Cached scan results. Option, autoload off — same reasoning as the SEO scan. */
 define( 'ISM_BROKEN_CACHE_KEY', 'ism_broken_scan_cache' );
 
+/** Row-shape version; a cache from an older shape is discarded, not served. */
+define( 'ISM_BROKEN_CACHE_VERSION', 2 );
+
 /** Posts examined per batch. Elementor JSON makes this the expensive walk. */
 define( 'ISM_BROKEN_BATCH', 40 );
 
@@ -56,6 +59,10 @@ function ism_broken_cache_get(): ?array {
 		return null;
 	}
 
+	if ( (int) ( $cache['version'] ?? 0 ) !== ISM_BROKEN_CACHE_VERSION ) {
+		return null;
+	}
+
 	return [
 		'refs'       => (array) $cache['refs'],
 		'scanned_at' => (int) ( $cache['scanned_at'] ?? 0 ),
@@ -69,6 +76,7 @@ function ism_broken_cache_set( array $refs ): void {
 	update_option( ISM_BROKEN_CACHE_KEY, [
 		'refs'       => $refs,
 		'scanned_at' => time(),
+		'version'    => ISM_BROKEN_CACHE_VERSION,
 	], false );
 }
 
@@ -148,10 +156,15 @@ function ism_broken_stale_ids( WP_Post $post ): array {
 		if ( is_array( $elements ) ) {
 			$found = [];
 			$eurls = [];
-			ism_usage_walk_elementor( $elements, $found, $eurls );
+			$ekeys = [];
+			ism_usage_walk_elementor( $elements, $found, $eurls, $ekeys );
 
 			foreach ( array_keys( $found ) as $id ) {
-				$sources[ (int) $id ][] = [ 'source' => 'elementor', 'field' => '_elementor_data' ];
+				$sources[ (int) $id ][] = [
+					'source'  => 'elementor',
+					'field'   => '_elementor_data',
+					'control' => (string) ( $ekeys[ (int) $id ] ?? '' ),
+				];
 			}
 			foreach ( $eurls as $id => $url ) {
 				$urls[ (int) $id ] = $url;
@@ -214,12 +227,15 @@ function ism_broken_stale_ids( WP_Post $post ): array {
 				'post_id'     => $post_id,
 				'post_title'  => $post->post_title !== '' ? $post->post_title : '(no title)',
 				'post_type'   => $post->post_type,
+				'permalink'   => (string) ( get_permalink( $post_id ) ?: '' ),
 				'source'      => $place['source'],
 				'field'       => $place['field'],
 				'ref'         => (string) $id,
 				'url'         => $url,
+				'control'     => (string) ( $place['control'] ?? '' ),
 				'filename'    => $filename,
 				'recoverable' => $filename !== '',
+				'severity'    => ism_broken_severity( 'stale_id', $post, $url, (string) ( $place['control'] ?? '' ) ),
 			];
 		}
 	}
@@ -278,16 +294,146 @@ function ism_broken_missing_files( WP_Post $post ): array {
 			'post_id'     => $post_id,
 			'post_title'  => $post->post_title !== '' ? $post->post_title : '(no title)',
 			'post_type'   => $post->post_type,
+			'permalink'   => (string) ( get_permalink( $post_id ) ?: '' ),
 			'source'      => $place['source'],
 			'field'       => $place['field'],
 			'ref'         => (string) $url,
 			'url'         => (string) $url,
+			'control'     => '',
 			'filename'    => ism_broken_filename_from_url( (string) $url ),
 			'recoverable' => true,
+			'severity'    => ism_broken_severity( 'missing_file', $post, (string) $url, '' ),
 		];
 	}
 
 	return $found;
+}
+
+/**
+ * How likely this reference is to be a hole a visitor actually sees.
+ *
+ * Detection finds references; it cannot see a rendered page. Several kinds of
+ * broken reference never appear to anyone, and reporting them at the same
+ * weight as a genuine gap is what makes a list of 110 useless:
+ *
+ *   renders_ok     The attachment row is gone but the file it points at is
+ *                  still on disk. Both Elementor and post markup render the
+ *                  URL, not the ID, so the page looks correct. The stale ID
+ *                  still costs a broken srcset and a failed alt-text lookup,
+ *                  and it will confuse the block editor, but nobody sees a gap.
+ *   responsive     Sits under a *_tablet or *_mobile control, so it only ever
+ *                  renders at that breakpoint. Invisible on a desktop check.
+ *   template       Lives on a saved Elementor template. Whether it renders at
+ *                  all depends on whether that template is used, and where.
+ *                  Widget settings there are frequently defaults that dynamic
+ *                  or ACF data replaces at render time.
+ *   likely_visible Everything else: no file to render, on a real page.
+ *
+ * This is a heuristic and is labelled as one. ism_broken_verify_live() is the
+ * way to actually settle it.
+ *
+ * @param string  $type
+ * @param WP_Post $post
+ * @param string  $url
+ * @param string  $control
+ * @return string
+ */
+function ism_broken_severity( string $type, WP_Post $post, string $url, string $control ): string {
+	if ( $control !== '' && preg_match( '/_(tablet|mobile)(_\w+)?$/', $control ) ) {
+		return 'responsive';
+	}
+
+	if ( $post->post_type === 'elementor_library' ) {
+		return 'template';
+	}
+
+	if ( $type === 'stale_id' && $url !== '' ) {
+		$path = ism_broken_url_to_path( $url );
+		if ( $path !== '' && file_exists( $path ) ) {
+			return 'renders_ok';
+		}
+	}
+
+	return 'likely_visible';
+}
+
+/**
+ * Fetch the live page and report whether the broken image is really on it.
+ *
+ * The only way to settle the question. The heuristic above reasons about where
+ * a reference sits; this looks at what the site actually sends a visitor.
+ *
+ * @param array $ref
+ * @return array{checked:bool, found:bool, status:int, message:string, url:string}
+ */
+function ism_broken_verify_live( array $ref ): array {
+	$permalink = get_permalink( (int) $ref['post_id'] );
+
+	if ( ! $permalink ) {
+		return [ 'checked' => false, 'found' => false, 'status' => 0, 'url' => '',
+			'message' => 'This item has no public URL, so it cannot be checked directly.' ];
+	}
+
+	$response = wp_remote_get( $permalink, [
+		'timeout'   => 25,
+		'sslverify' => false, // local development certificates
+	] );
+
+	if ( is_wp_error( $response ) ) {
+		return [ 'checked' => false, 'found' => false, 'status' => 0, 'url' => $permalink,
+			'message' => 'Could not load the page: ' . $response->get_error_message() ];
+	}
+
+	$status = (int) wp_remote_retrieve_response_code( $response );
+	$html   = (string) wp_remote_retrieve_body( $response );
+
+	if ( $status !== 200 ) {
+		return [ 'checked' => false, 'found' => false, 'status' => $status, 'url' => $permalink,
+			'message' => 'The page returned HTTP ' . $status . '.' ];
+	}
+
+	// Match on the filename rather than the whole URL: the rendered markup may
+	// use a different size variant or a CDN host for the same file.
+	$needle = $ref['filename'] !== '' ? $ref['filename'] : basename( (string) $ref['url'] );
+	$stem   = (string) preg_replace( '/\.[a-z0-9]+$/i', '', $needle );
+
+	if ( $stem === '' ) {
+		return [ 'checked' => false, 'found' => false, 'status' => $status, 'url' => $permalink,
+			'message' => 'This reference stores no filename, so there is nothing to search the page for.' ];
+	}
+
+	$found = stripos( $html, $stem ) !== false;
+
+	return [
+		'checked' => true,
+		'found'   => $found,
+		'status'  => $status,
+		'url'     => $permalink,
+		'message' => $found
+			? 'The rendered page still requests this file, so a visitor sees a broken image here. Worth fixing.'
+			: 'The rendered page never requests this file. Nothing visibly broken — the reference is leftover data, safe to leave or clean up at your convenience.',
+	];
+}
+
+/**
+ * AJAX: check one reference against the live page.
+ */
+function ism_ajax_broken_verify(): void {
+	check_ajax_referer( 'ism_seo', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	@set_time_limit( 60 ); // phpcs:ignore
+
+	$key = sanitize_text_field( wp_unslash( (string) ( $_POST['key'] ?? '' ) ) );
+	$ref = ism_repoint_find_ref( $key );
+
+	if ( ! $ref ) {
+		wp_send_json_error( 'That reference is not in the current scan.' );
+	}
+
+	wp_send_json_success( ism_broken_verify_live( $ref ) );
 }
 
 /**
@@ -357,6 +503,7 @@ function ism_broken_remove_ref( string $key ): void {
 	update_option( ISM_BROKEN_CACHE_KEY, [
 		'refs'       => $refs,
 		'scanned_at' => $cache['scanned_at'],
+		'version'    => ISM_BROKEN_CACHE_VERSION,
 	], false );
 }
 
