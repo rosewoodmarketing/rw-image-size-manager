@@ -1225,6 +1225,17 @@
 		return !! ( p && ! p.error );
 	}
 
+	// Mirrors the server's ism_seo_row() so the two agree about what "missing"
+	// means. Kept here as well because after an apply the browser knows what it
+	// wrote and should not need a rescan to reflect it.
+	function seoMissingFields( current ) {
+		var out = [];
+		[ 'title', 'alt_text', 'description' ].forEach( function ( f ) {
+			if ( ! ( current[ f ] || '' ).toString().trim() ) { out.push( f ); }
+		} );
+		return out;
+	}
+
 	function seoGroupProposal( g ) {
 		for ( var i = 0; i < g.ids.length; i++ ) {
 			if ( seoProposals[ String( g.ids[ i ] ) ] ) { return seoProposals[ String( g.ids[ i ] ) ]; }
@@ -1298,6 +1309,7 @@
 		var pop      = $( '#ism-seo-filter' ).val() || 'usable';
 		var review   = $( '#ism-seo-review-filter' ).val() || 'unreviewed';
 		var proposal = $( '#ism-seo-proposal-filter' ).val() || 'all';
+		var metadata = $( '#ism-seo-metadata-filter' ).val() || 'all';
 		var term     = ( $( '#ism-seo-search' ).val() || '' ).toLowerCase();
 
 		return seoGroups.filter( function ( g ) {
@@ -1311,6 +1323,15 @@
 			if ( review === 'reviewed'   && ! g.reviewed ) { return false; }
 
 			if ( proposal === 'proposals' && ! seoHasOpenProposal( g ) ) { return false; }
+
+			// What is actually empty on the image today. Title is deliberately
+			// not offered: WordPress fills one in from the filename on every
+			// upload, so "missing title" is empty on every normal site and
+			// would read as a broken filter rather than a finished job.
+			if ( metadata === 'any'      && ! g.missing.length ) { return false; }
+			if ( metadata === 'complete' && g.missing.length ) { return false; }
+			if ( ( metadata === 'alt_text' || metadata === 'description' )
+				&& g.missing.indexOf( metadata ) === -1 ) { return false; }
 
 			if ( term ) {
 				var hay = g.rep.filename.toLowerCase() + ' '
@@ -1509,7 +1530,7 @@
 		} );
 	} );
 
-	$( document ).on( 'change', '#ism-seo-filter, #ism-seo-review-filter, #ism-seo-proposal-filter', function () {
+	$( document ).on( 'change', '#ism-seo-filter, #ism-seo-review-filter, #ism-seo-proposal-filter, #ism-seo-metadata-filter', function () {
 		seoPage = 1;
 		seoRenderChart();
 	} );
@@ -1825,7 +1846,13 @@
 					if ( v.title ) { row.current.title = v.title; }
 					if ( v.alt_text ) { row.current.alt_text = v.alt_text; }
 					if ( v.description ) { row.current.description = v.description; }
+					row.missing = seoMissingFields( row.current );
 				} );
+
+				// Derived from the values just written, so a row that has been
+				// filled in leaves the missing-metadata filters immediately
+				// rather than lingering there until the next scan.
+				g.missing = g.rep.missing;
 				delete seoEdits[ g.key ];
 			} );
 			seoChecked = {};

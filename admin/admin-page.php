@@ -752,6 +752,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 							<option value="proposals"><?php esc_html_e( 'Current proposals only', 'image-size-manager' ); ?></option>
 						</select>
 					</label>
+					<label>
+						<?php esc_html_e( 'Metadata', 'image-size-manager' ); ?>
+						<select id="ism-seo-metadata-filter">
+							<option value="all"><?php esc_html_e( 'All', 'image-size-manager' ); ?></option>
+							<option value="any"><?php esc_html_e( 'Missing any field', 'image-size-manager' ); ?></option>
+							<option value="alt_text"><?php esc_html_e( 'Missing alt text', 'image-size-manager' ); ?></option>
+							<option value="description"><?php esc_html_e( 'Missing description', 'image-size-manager' ); ?></option>
+							<option value="complete"><?php esc_html_e( 'Nothing missing', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
 					<input type="search" id="ism-seo-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename or page…', 'image-size-manager' ); ?>" />
 					<button type="button" class="button" id="ism-seo-check-all" data-mode="select"><?php esc_html_e( 'Select all', 'image-size-manager' ); ?></button>
 					<span class="ism-seo-chart-count"></span>
