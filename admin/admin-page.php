@@ -521,15 +521,55 @@ if ( ! defined( 'ABSPATH' ) ) {
 					</label>
 				</p>
 				<?php endif; ?>
-				<p class="description">
-					<?php
-					printf(
-						/* translators: %s: model identifier */
-						esc_html__( 'Generation uses %s.', 'image-size-manager' ),
-						'<code>' . esc_html( ISM_AI_MODEL ) . '</code>'
-					);
-					?>
-				</p>
+			</div>
+
+			<!-- Generation settings ─────────────────────────────────────── -->
+			<div class="ism-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Generation Settings', 'image-size-manager' ); ?></h4>
+
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="ism-ai-model"><?php esc_html_e( 'Model', 'image-size-manager' ); ?></label></th>
+						<td>
+							<?php $ism_current_model = ism_ai_get_model(); ?>
+							<select name="ism_ai_model" id="ism-ai-model">
+								<?php foreach ( ism_ai_models() as $ism_mid => $ism_m ) : ?>
+									<option value="<?php echo esc_attr( $ism_mid ); ?>" <?php selected( $ism_current_model, $ism_mid ); ?>>
+										<?php
+										printf(
+											'%s — $%s / $%s per million tokens',
+											esc_html( $ism_m['label'] ),
+											esc_html( number_format( $ism_m['in'], 2 ) ),
+											esc_html( number_format( $ism_m['out'], 2 ) )
+										);
+										?>
+									</option>
+								<?php endforeach; ?>
+							</select>
+							<?php foreach ( ism_ai_models() as $ism_mid => $ism_m ) : ?>
+								<p class="description ism-model-note" data-model="<?php echo esc_attr( $ism_mid ); ?>"
+									<?php echo $ism_current_model === $ism_mid ? '' : 'style="display:none"'; ?>>
+									<?php echo esc_html( $ism_m['note'] ); ?>
+								</p>
+							<?php endforeach; ?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="ism-context-max-chars"><?php esc_html_e( 'Page context', 'image-size-manager' ); ?></label></th>
+						<td>
+							<input type="number" name="ism_context_max_chars" id="ism-context-max-chars" class="small-text"
+								min="100" max="20000" step="100"
+								value="<?php echo esc_attr( (string) ism_context_max_chars() ); ?>" />
+							<?php esc_html_e( 'characters', 'image-size-manager' ); ?>
+							<p class="description">
+								<?php esc_html_e( 'Total budget for page text across every page an image appears on. Every page is always named in the prompt; this controls how much of their body copy is included. Spent in relevance order — a page using the image as its featured image goes first, then body and builder content, then custom fields, with header and footer templates last.', 'image-size-manager' ); ?>
+							</p>
+							<p class="description">
+								<?php esc_html_e( 'More context costs more per image. 1000 is a reasonable start; raise it if output reads generic.', 'image-size-manager' ); ?>
+							</p>
+						</td>
+					</tr>
+				</table>
 			</div>
 
 			<!-- Usage index ─────────────────────────────────────────────── -->
@@ -586,6 +626,34 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<div id="ism-seo-summary" class="ism-seo-summary" style="display:none"></div>
 			</div>
 
+			<!-- The chart ───────────────────────────────────────────────── -->
+			<div class="ism-card" id="ism-seo-chart-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Image usage chart', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Every image and every place it appears. Duplicate files are folded into one row — generate once and it applies to all copies. Tick the images you want proposals for, or use the bulk control above the table.', 'image-size-manager' ); ?>
+				</p>
+
+				<div class="ism-seo-chart-toolbar">
+					<label>
+						<?php esc_html_e( 'Show', 'image-size-manager' ); ?>
+						<select id="ism-seo-filter">
+							<option value="ready"><?php esc_html_e( 'Ready to generate', 'image-size-manager' ); ?></option>
+							<option value="noalt"><?php esc_html_e( 'Ready, missing alt text', 'image-size-manager' ); ?></option>
+							<option value="dupes"><?php esc_html_e( 'Duplicates only', 'image-size-manager' ); ?></option>
+							<option value="skipped"><?php esc_html_e( 'Decorative / unsupported', 'image-size-manager' ); ?></option>
+							<option value="unused"><?php esc_html_e( 'Not found on any page', 'image-size-manager' ); ?></option>
+							<option value="all"><?php esc_html_e( 'Everything', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<input type="search" id="ism-seo-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename or page…', 'image-size-manager' ); ?>" />
+					<button type="button" class="button" id="ism-seo-check-all"><?php esc_html_e( 'Tick all shown', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-check-none"><?php esc_html_e( 'Untick all', 'image-size-manager' ); ?></button>
+					<span class="ism-seo-chart-count"></span>
+				</div>
+
+				<div id="ism-seo-chart"></div>
+			</div>
+
 			<!-- Generate ────────────────────────────────────────────────── -->
 			<div class="ism-card ism-bulk-card" id="ism-seo-generate-card" style="margin-top:18px; display:none">
 				<h4><?php esc_html_e( 'Step 3 — Generate proposals', 'image-size-manager' ); ?></h4>
@@ -600,12 +668,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<?php endif; ?>
 
 				<p>
-					<label>
-						<?php esc_html_e( 'Generate for', 'image-size-manager' ); ?>
-						<input type="number" id="ism-seo-limit" class="small-text" value="20" min="1" max="2000" />
-						<?php esc_html_e( 'images without a proposal yet', 'image-size-manager' ); ?>
+					<label style="display:block;margin-bottom:6px">
+						<input type="radio" name="ism_seo_mode" value="selected" checked />
+						<?php esc_html_e( 'Only the images I ticked in the chart', 'image-size-manager' ); ?>
+						<span class="ism-seo-selected-count description"></span>
 					</label>
-					<span class="description" style="display:block;margin-top:4px">
+					<label style="display:block">
+						<input type="radio" name="ism_seo_mode" value="first" />
+						<?php esc_html_e( 'The first', 'image-size-manager' ); ?>
+						<input type="number" id="ism-seo-limit" class="small-text" value="20" min="1" max="2000" />
+						<?php esc_html_e( 'ready images without a proposal yet', 'image-size-manager' ); ?>
+					</label>
+					<span class="description" style="display:block;margin-top:6px">
 						<?php esc_html_e( 'Start small on a new site and read the output before scaling up.', 'image-size-manager' ); ?>
 					</span>
 				</p>
@@ -643,22 +717,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<div id="ism-seo-review-list"></div>
 			</div>
 
-			<!-- Listed but never generated ──────────────────────────────── -->
-			<div class="ism-card" id="ism-seo-skipped-card" style="margin-top:18px; display:none">
-				<h4><?php esc_html_e( 'Decorative and unsupported media', 'image-size-manager' ); ?></h4>
-				<p class="description">
-					<?php esc_html_e( 'SVGs, icons and formats that cannot be described. Listed so they can be renamed or merged by hand — a decorative mark given prose alt text is a bug, not a fix. Generation is disabled for these.', 'image-size-manager' ); ?>
-				</p>
-				<div id="ism-seo-skipped-list"></div>
-			</div>
-
-			<div class="ism-card" id="ism-seo-unused-card" style="margin-top:18px; display:none">
-				<h4><?php esc_html_e( 'Not found on any page', 'image-size-manager' ); ?></h4>
-				<p class="description">
-					<?php esc_html_e( 'The usage index found no page, template or custom field referencing these. Without page context the output would be guesswork, so generation is disabled. Worth checking whether they are genuinely unused before spending anything on them.', 'image-size-manager' ); ?>
-				</p>
-				<div id="ism-seo-unused-list"></div>
-			</div>
 
 		</div><!-- /ism-panel-seo -->
 

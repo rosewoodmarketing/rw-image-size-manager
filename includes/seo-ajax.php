@@ -130,9 +130,24 @@ function ism_seo_row( int $attachment_id ): array {
 	);
 
 	$usages = ism_usage_get_detailed( $attachment_id );
-	$titles = [];
-	foreach ( array_slice( $usages, 0, ISM_SEO_USED_ON_SHOWN ) as $usage ) {
-		$titles[] = (string) $usage['title'];
+
+	// Every place, not a sample. The whole point of the chart is to see where an
+	// image actually lives before deciding what to say about it, and a merge
+	// later has to repoint every reference rather than the first two.
+	usort( $usages, function ( $a, $b ) {
+		return ism_context_usage_rank( $a ) <=> ism_context_usage_rank( $b );
+	} );
+
+	$places = [];
+	foreach ( $usages as $usage ) {
+		$places[] = [
+			'title'     => (string) $usage['title'],
+			'type'      => (string) $usage['post_type'],
+			'source'    => (string) $usage['source'],
+			'featured'  => $usage['source'] === 'featured',
+			'edit_url'  => (string) $usage['edit_url'],
+			'permalink' => (string) $usage['permalink'],
+		];
 	}
 
 	if ( $skip_reason !== '' ) {
@@ -143,7 +158,16 @@ function ism_seo_row( int $attachment_id ): array {
 		$group = 'ready';
 	}
 
-	$needs_client = $group === 'ready' && ism_vision_needs_client_decode( $attachment_id );
+	// Computed for every group, not just ready ones: an overridden SVG or unused
+	// image still has to travel whichever route its format requires.
+	$needs_client = ism_vision_needs_client_decode( $attachment_id );
+
+	// An SVG has no raster the server can send, but a browser renders it to
+	// canvas natively, so an override routes it through the same client
+	// conversion path everything else uses.
+	if ( $skip_reason === 'svg' ) {
+		$needs_client = true;
+	}
 
 	$thumb = wp_get_attachment_image_src( $attachment_id, 'thumbnail' );
 
@@ -151,18 +175,15 @@ function ism_seo_row( int $attachment_id ): array {
 		'id'           => $attachment_id,
 		'filename'     => $file ? basename( $file ) : '',
 		'mime'         => $mime,
+		'hash'         => (string) get_post_meta( $attachment_id, ISM_HASH_META_KEY, true ),
 		'thumb'        => is_array( $thumb ) && ! empty( $thumb[0] ) ? (string) $thumb[0] : '',
 		'edit_url'     => (string) ( get_edit_post_link( $attachment_id, 'raw' ) ?: '' ),
 		'group'        => $group,
 		'skip_reason'  => $skip_reason,
 		'needs_client' => $needs_client,
-
-		// Only sent when the browser will actually have to do the conversion,
-		// so the payload does not carry a URL per row for nothing.
 		'client_url'   => $needs_client ? ism_vision_client_url( $attachment_id ) : '',
-
 		'used_count'   => count( $usages ),
-		'used_on'      => $titles,
+		'places'       => $places,
 		'current'      => [
 			'title'       => $post ? (string) $post->post_title : '',
 			'alt_text'    => (string) get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
@@ -187,12 +208,13 @@ function ism_ajax_seo_scan_init(): void {
 	$state = ism_seo_get_state();
 
 	wp_send_json_success( [
-		'total'       => count( $ids ),
-		'has_key'     => ism_ai_has_key(),
-		'model'       => ISM_AI_MODEL,
-		'index_built' => (bool) ism_usage_index_status()['built_at'],
-		'results'     => $state['results'],
-		'usage'       => $state['usage'],
+		'total'        => count( $ids ),
+		'has_key'      => ism_ai_has_key(),
+		'model'        => ism_ai_get_model(),
+		'context_max'  => ism_context_max_chars(),
+		'index_built'  => (bool) ism_usage_index_status()['built_at'],
+		'results'      => $state['results'],
+		'usage'        => $state['usage'],
 	] );
 }
 
@@ -255,8 +277,13 @@ function ism_ajax_seo_generate(): void {
 		? trim( (string) wp_unslash( $_POST['image_data_url'] ) )
 		: '';
 
+	// Overriding the skip gate is explicit, per request, and never stored. A
+	// decorative mark stays undescribed unless someone asks for this image.
+	$override = ! empty( $_POST['override_skip'] );
+
 	$generated = ism_ai_generate_for_attachment( $attachment_id, [
 		'image_data_url' => $data_url,
+		'override_skip'  => $override,
 	] );
 
 	if ( is_wp_error( $generated ) ) {
@@ -301,6 +328,7 @@ function ism_ajax_seo_generate(): void {
 		'usage'         => $generated['usage'],
 		'run_usage'     => $state['usage'],
 		'source'        => $generated['image']['source'],
+		'model'         => $generated['model'],
 	] );
 }
 
@@ -379,9 +407,11 @@ function ism_ajax_seo_apply(): void {
 	$messages = [];
 
 	foreach ( $rows as $row ) {
-		$id = (int) ( $row['id'] ?? 0 );
-
-		if ( $id < 1 || get_post_type( $id ) !== 'attachment' ) {
+		// A row can stand for several attachments: duplicates share one
+		// proposal, so approving it once writes to every copy rather than
+		// leaving the others stale.
+		$ids = array_values( array_filter( array_map( 'intval', (array) ( $row['ids'] ?? [ $row['id'] ?? 0 ] ) ) ) );
+		if ( empty( $ids ) ) {
 			$skipped++;
 			continue;
 		}
@@ -390,37 +420,57 @@ function ism_ajax_seo_apply(): void {
 		$alt         = sanitize_text_field( wp_unslash( (string) ( $row['alt_text'] ?? '' ) ) );
 		$description = sanitize_textarea_field( wp_unslash( (string) ( $row['description'] ?? '' ) ) );
 
-		$post_update = [ 'ID' => $id ];
-
-		if ( $title !== '' ) {
-			$post_update['post_title'] = $title;
-		}
-		if ( $description !== '' ) {
-			$post_update['post_content'] = $description;
-		}
-
-		if ( count( $post_update ) > 1 ) {
-			wp_update_post( $post_update );
-		}
-
-		if ( $alt !== '' ) {
-			update_post_meta( $id, '_wp_attachment_image_alt', $alt );
-		}
-
-		if ( count( $post_update ) === 1 && $alt === '' ) {
+		if ( $title === '' && $description === '' && $alt === '' ) {
 			$skipped++;
 			continue;
 		}
 
-		$applied++;
-		$messages[] = sprintf( 'Updated #%d %s', $id, basename( (string) get_attached_file( $id ) ) );
+		$wrote = [];
+
+		foreach ( $ids as $id ) {
+			if ( get_post_type( $id ) !== 'attachment' ) {
+				continue;
+			}
+
+			$post_update = [ 'ID' => $id ];
+
+			if ( $title !== '' ) {
+				$post_update['post_title'] = $title;
+			}
+			if ( $description !== '' ) {
+				$post_update['post_content'] = $description;
+			}
+			if ( count( $post_update ) > 1 ) {
+				wp_update_post( $post_update );
+			}
+
+			if ( $alt !== '' ) {
+				update_post_meta( $id, '_wp_attachment_image_alt', $alt );
+			}
+
+			$wrote[] = $id;
+			$applied++;
+		}
+
+		if ( empty( $wrote ) ) {
+			$skipped++;
+			continue;
+		}
+
+		$messages[] = sprintf(
+			'Updated %s%s',
+			implode( ', ', array_map( function ( $i ) { return '#' . $i; }, $wrote ) ),
+			count( $wrote ) > 1 ? ' (duplicate group)' : ' ' . basename( (string) get_attached_file( $wrote[0] ) )
+		);
 	}
 
 	// Applied rows leave the run: their proposals are now the live values, and
 	// keeping them would offer the user the chance to apply them twice.
 	$state = ism_seo_get_state();
 	foreach ( $rows as $row ) {
-		unset( $state['results'][ (string) (int) ( $row['id'] ?? 0 ) ] );
+		foreach ( (array) ( $row['ids'] ?? [ $row['id'] ?? 0 ] ) as $id ) {
+			unset( $state['results'][ (string) (int) $id ] );
+		}
 	}
 	ism_seo_set_state( $state );
 

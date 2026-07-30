@@ -674,3 +674,62 @@
 
 #ism-seo-generate-log { max-height: 220px; overflow-y: auto; }
 #ism-seo-generate-log .ism-log-error { color: #b32d2e; }
+
+/* ── Image SEO chart ────────────────────────────────────────────────────── */
+
+.ism-seo-chart-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+	margin: 14px 0;
+	padding-bottom: 12px;
+	border-bottom: 1px solid #dcdcde;
+}
+.ism-seo-chart-count { color: #50575e; margin-left: auto; }
+
+.ism-seo-row {
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 10px 12px;
+	margin-bottom: 10px;
+	background: #fff;
+}
+.ism-seo-row-head { display: flex; align-items: flex-start; gap: 12px; }
+.ism-seo-row-head img { object-fit: cover; border-radius: 3px; flex: none; }
+.ism-seo-row-meta { flex: 1; min-width: 0; }
+.ism-seo-row-name { font-weight: 600; word-break: break-all; }
+.ism-seo-ids { font-weight: 400; color: #a7aaad; font-size: 12px; }
+.ism-seo-check { padding-top: 4px; }
+
+.ism-seo-badges { margin: 4px 0; display: flex; gap: 5px; flex-wrap: wrap; }
+.ism-seo-badges .ism-badge { font-size: 11px; padding: 1px 7px; border-radius: 9px; }
+.ism-badge-dupe     { background: #e7e3ff; color: #4b2ea8; }
+.ism-badge-skip     { background: #f0f0f1; color: #50575e; }
+.ism-badge-unused   { background: #fdf0e3; color: #8a5700; }
+.ism-badge-client   { background: #e3f0fd; color: #10508a; }
+.ism-badge-noalt    { background: #fce8e8; color: #a32c2c; }
+.ism-badge-proposed { background: #e3f5e6; color: #1d7e2d; }
+.ism-badge-failed   { background: #fce8e8; color: #a32c2c; }
+
+.ism-seo-places { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.ism-seo-place {
+	display: inline-flex;
+	flex-direction: column;
+	background: #f6f7f7;
+	border: 1px solid #e0e0e1;
+	border-radius: 3px;
+	padding: 2px 7px;
+	font-size: 12px;
+	line-height: 1.35;
+}
+.ism-seo-place-featured { background: #eef6ff; border-color: #b9d6f2; }
+.ism-seo-place em { font-style: normal; color: #787c82; font-size: 11px; }
+.ism-seo-noplace { color: #8a5700; font-size: 12px; }
+
+.ism-seo-fields { display: grid; gap: 8px; margin-top: 10px; }
+.ism-seo-field-changed label { color: #1d7e2d; }
+.ism-seo-field-changed input,
+.ism-seo-field-changed textarea { border-color: #7ac47f; }
+
+.ism-seo-override { flex: none; }

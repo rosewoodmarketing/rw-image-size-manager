@@ -31,6 +31,7 @@ require_once ISM_PLUGIN_DIR . 'includes/usage-index.php';
 require_once ISM_PLUGIN_DIR . 'includes/context-builder.php';
 require_once ISM_PLUGIN_DIR . 'includes/image-source.php';
 require_once ISM_PLUGIN_DIR . 'includes/ai-client.php';
+require_once ISM_PLUGIN_DIR . 'includes/file-hash.php';
 require_once ISM_PLUGIN_DIR . 'includes/seo-ajax.php';
 
 if ( is_admin() ) {
@@ -95,6 +96,7 @@ add_action( 'wp_ajax_ism_seo_scan_batch', 'ism_ajax_seo_scan_batch' );
 add_action( 'wp_ajax_ism_seo_generate',   'ism_ajax_seo_generate' );
 add_action( 'wp_ajax_ism_seo_apply',      'ism_ajax_seo_apply' );
 add_action( 'wp_ajax_ism_seo_reset',      'ism_ajax_seo_reset' );
+add_action( 'wp_ajax_ism_hash_batch',     'ism_ajax_hash_batch' );
 
 // AJAX: usage index build (Image SEO tab depends on it)
 add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );
@@ -945,6 +947,14 @@ function ism_handle_save(): void {
 			'delete_images'    => ! empty( $rule['delete_images'] ) ? '1' : '0',
 		];
 	}
+
+	// ── Generation model and context budget ─────────────────────────────────
+	$submitted_model = sanitize_text_field( wp_unslash( $_POST['ism_ai_model'] ?? '' ) );
+	$settings['ai_model'] = isset( ism_ai_models()[ $submitted_model ] ) ? $submitted_model : '';
+
+	// Clamped rather than rejected: a silly number should land somewhere sane,
+	// not fail the whole save.
+	$settings['context_max_chars'] = min( 20000, max( 100, (int) ( $_POST['ism_context_max_chars'] ?? ISM_CONTEXT_MAX_CHARS ) ) );
 
 	// ── Anthropic API key ────────────────────────────────────────────────────
 	// Stored by ism_ai_set_key() in its own option with autoload off, never in

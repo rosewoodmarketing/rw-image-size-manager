@@ -30,11 +30,62 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-/** Characters of page text to keep per referencing post. */
+/** Default total characters of page text across every referencing post. */
 define( 'ISM_CONTEXT_MAX_CHARS', 1000 );
 
-/** Referencing posts to include before truncating the list. */
-define( 'ISM_CONTEXT_MAX_POSTS', 3 );
+/** Floor on the per-post slice, so a large budget never starves later pages. */
+define( 'ISM_CONTEXT_MIN_SLICE', 200 );
+
+/**
+ * How many characters of page text this site includes, in total.
+ *
+ * A budget rather than a per-post cap: every page an image appears on is named
+ * in the context, and their body text is spent against one shared allowance in
+ * weight order, so the pages most likely to explain the image are the ones that
+ * survive truncation.
+ *
+ * @return int
+ */
+function ism_context_max_chars(): int {
+	$settings = ism_get_settings();
+	$chars    = (int) ( $settings['context_max_chars'] ?? 0 );
+
+	if ( $chars < 100 ) {
+		return ISM_CONTEXT_MAX_CHARS;
+	}
+
+	return min( $chars, 20000 );
+}
+
+/**
+ * Ranking for one usage. Lower sorts first and gets text before the budget runs out.
+ *
+ * A featured image is the page's own image and is ranked above everything: if
+ * any page explains what an image is, it is that one. Body and builder
+ * placements come next, then custom fields, and template chrome last — a header
+ * or footer says almost nothing about a photograph, and on a site built from
+ * saved templates it would otherwise crowd out the pages that do.
+ *
+ * @param array $usage
+ * @return int
+ */
+function ism_context_usage_rank( array $usage ): int {
+	$source = (string) ( $usage['source'] ?? '' );
+
+	if ( $source === 'featured' ) {
+		return 0;
+	}
+
+	if ( ( $usage['post_type'] ?? '' ) === 'elementor_library' ) {
+		return 3;
+	}
+
+	if ( in_array( $source, [ 'acf', 'acf_term', 'acf_option', 'custom_field', 'term_field' ], true ) ) {
+		return 2;
+	}
+
+	return 1;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public entry point
@@ -82,38 +133,32 @@ function ism_context_for_attachment( int $attachment_id ): array {
 
 	$usages = ism_usage_get_detailed( $attachment_id );
 
-	// Prefer the pages most likely to describe the image: real content before
-	// Elementor templates, since a header or footer says little about a photo.
+	// Weight order, so the pages most likely to explain the image are the ones
+	// that get text before the character budget runs out. Stable within a rank:
+	// equal-ranked pages keep index order rather than being reshuffled.
 	usort( $usages, function ( $a, $b ) {
-		$rank = function ( array $u ): int {
-			if ( $u['post_type'] === 'elementor_library' ) {
-				return 2;
-			}
-			if ( $u['source'] === 'featured' ) {
-				return 0;
-			}
-			return 1;
-		};
-		return $rank( $a ) <=> $rank( $b );
+		return ism_context_usage_rank( $a ) <=> ism_context_usage_rank( $b );
 	} );
 
-	// Skipped media still gets its usage list. An SVG is never described by the
-	// generator, but it is still listed in the admin tab so a dev can rename it
-	// by hand or merge a duplicate, and both of those need to know where it
-	// appears. The whole list is kept in that case rather than the first few,
-	// because a merge has to repoint every reference, not a sample of them.
+	// Every referencing page is listed, whatever the budget — a title and a
+	// focus keyword cost almost nothing and are often the most useful line in
+	// the whole context. Body text is what gets rationed.
 	//
-	// Only the expensive half is conditional: walking each referencing page for
-	// prose and SEO fields exists to feed a prompt, and there is no prompt here.
-	$limit = $context['skip'] ? count( $usages ) : ISM_CONTEXT_MAX_POSTS;
+	// Skipped media is listed too. An SVG is never described by the generator
+	// unless explicitly overridden, but it still appears in the admin tab so it
+	// can be renamed or merged by hand, and a merge has to repoint every
+	// reference rather than a sample of them.
+	$budget = $context['skip'] ? 0 : ism_context_max_chars();
+	$slice  = max( ISM_CONTEXT_MIN_SLICE, (int) floor( $budget / 3 ) );
 
-	foreach ( array_slice( $usages, 0, $limit ) as $usage ) {
+	foreach ( $usages as $usage ) {
 		$usage['text'] = '';
 		$usage['seo']  = [ 'focus_keyword' => '', 'meta_description' => '' ];
 
-		if ( ! $context['skip'] ) {
-			$usage['text'] = ism_context_post_text( (int) $usage['post_id'] );
+		if ( $budget > 0 ) {
 			$usage['seo']  = ism_context_post_seo( (int) $usage['post_id'] );
+			$usage['text'] = ism_context_post_text( (int) $usage['post_id'], min( $slice, $budget ) );
+			$budget       -= mb_strlen( $usage['text'] );
 		}
 
 		$context['usages'][] = $usage;
@@ -243,7 +288,11 @@ function ism_context_name_hint( string $filename ): string {
  * @param int $post_id
  * @return string
  */
-function ism_context_post_text( int $post_id ): string {
+function ism_context_post_text( int $post_id, int $max_chars = 0 ): string {
+	if ( $max_chars < 1 ) {
+		$max_chars = ism_context_max_chars();
+	}
+
 	$parts = [];
 
 	// Elementor first: on Elementor pages post_content is empty or a stub.
@@ -266,13 +315,18 @@ function ism_context_post_text( int $post_id ): string {
 		$parts[] = (string) $post->post_content;
 	}
 
-	$text = ism_context_clean_text( implode( ' ', $parts ) );
-
-	if ( function_exists( 'mb_substr' ) ) {
-		return mb_substr( $text, 0, ISM_CONTEXT_MAX_CHARS );
+	// Custom fields. On a CPT built out of ACF — product pages here — the entire
+	// body copy lives in text, textarea and wysiwyg fields, and neither
+	// post_content nor _elementor_data holds a word of it. Without this a
+	// product page contributes its title and nothing else.
+	$acf = ism_context_acf_text( $post_id );
+	if ( $acf !== '' ) {
+		$parts[] = $acf;
 	}
 
-	return substr( $text, 0, ISM_CONTEXT_MAX_CHARS );
+	$text = ism_context_clean_text( implode( ' ', $parts ) );
+
+	return mb_substr( $text, 0, $max_chars );
 }
 
 /**
@@ -364,6 +418,84 @@ function ism_context_is_machine_string( string $key, string $value ): bool {
 }
 
 /**
+ * Prose held in a post's ACF text fields.
+ *
+ * Identified the same way usage-index.php identifies media fields: ACF writes a
+ * companion `_key` row beside every value, and the field definition names its
+ * own type. Only text, textarea and wysiwyg are read, so a URL, a select value
+ * or a colour never lands in the prompt as though it were copy.
+ *
+ * @param int $post_id
+ * @return string
+ */
+function ism_context_acf_text( int $post_id ): string {
+	global $wpdb;
+
+	$keys = ism_context_acf_text_field_keys();
+	if ( empty( $keys ) ) {
+		return '';
+	}
+
+	$rows = $wpdb->get_results( $wpdb->prepare(
+		"SELECT m.meta_value, c.meta_value AS field_key
+		 FROM {$wpdb->postmeta} m
+		 INNER JOIN {$wpdb->postmeta} c
+		    ON c.post_id = m.post_id AND c.meta_key = CONCAT( '_', m.meta_key )
+		 WHERE m.post_id = %d
+		   AND c.meta_value LIKE %s",
+		$post_id,
+		$wpdb->esc_like( 'field_' ) . '%'
+	) );
+
+	$parts = [];
+
+	foreach ( $rows as $row ) {
+		if ( ! isset( $keys[ (string) $row->field_key ] ) ) {
+			continue;
+		}
+
+		$value = maybe_unserialize( $row->meta_value );
+		if ( is_string( $value ) && trim( $value ) !== '' ) {
+			$parts[] = $value;
+		}
+	}
+
+	return implode( ' ', $parts );
+}
+
+/**
+ * ACF field keys whose definition declares them as prose.
+ *
+ * @return array<string,bool>
+ */
+function ism_context_acf_text_field_keys(): array {
+	static $keys = null;
+
+	if ( $keys !== null ) {
+		return $keys;
+	}
+
+	global $wpdb;
+
+	$keys = [];
+
+	$rows = $wpdb->get_results(
+		"SELECT post_name, post_content FROM {$wpdb->posts} WHERE post_type = 'acf-field'"
+	);
+
+	foreach ( $rows as $row ) {
+		$definition = maybe_unserialize( $row->post_content );
+		$type       = is_array( $definition ) ? (string) ( $definition['type'] ?? '' ) : '';
+
+		if ( in_array( $type, [ 'text', 'textarea', 'wysiwyg' ], true ) ) {
+			$keys[ (string) $row->post_name ] = true;
+		}
+	}
+
+	return $keys;
+}
+
+/**
  * Yoast or Rank Math signals for a post, when present.
  *
  * @param int $post_id
@@ -432,12 +564,19 @@ function ism_context_render( array $context ): string {
 	$lines[] = 'Website: ' . $site;
 
 	if ( ! empty( $context['usages'] ) ) {
-		foreach ( $context['usages'] as $i => $usage ) {
+		$lines[] = '';
+		$lines[] = sprintf(
+			'This image appears in %d place(s) on the site, listed below most relevant first.',
+			count( $context['usages'] )
+		);
+
+		foreach ( $context['usages'] as $usage ) {
 			$lines[] = '';
 			$lines[] = sprintf(
-				'Appears on %s "%s"',
+				'Appears on %s "%s"%s',
 				$usage['post_type'] === 'elementor_library' ? 'template' : $usage['post_type'],
-				$usage['title']
+				$usage['title'],
+				$usage['source'] === 'featured' ? ' — as that page\'s featured image' : ''
 			);
 			if ( $usage['seo']['focus_keyword'] !== '' ) {
 				$lines[] = 'Target keyword for that page: ' . $usage['seo']['focus_keyword'];

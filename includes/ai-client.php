@@ -183,15 +183,88 @@ function ism_ai_has_key(): bool {
  * @param string $model
  * @return array{effort:bool, thinking:string, cache_min:int}
  */
-function ism_ai_model_profile( string $model = ISM_AI_MODEL ): array {
-	$profiles = [
-		'claude-haiku-4-5' => [ 'effort' => false, 'thinking' => 'none',     'cache_min' => 4096 ],
-		'claude-sonnet-5'  => [ 'effort' => true,  'thinking' => 'adaptive', 'cache_min' => 1024 ],
-		'claude-opus-5'    => [ 'effort' => true,  'thinking' => 'adaptive', 'cache_min' => 512 ],
-		'claude-opus-4-8'  => [ 'effort' => true,  'thinking' => 'adaptive', 'cache_min' => 1024 ],
-	];
+function ism_ai_model_profile( string $model = '' ): array {
+	if ( $model === '' ) {
+		$model = ism_ai_get_model();
+	}
 
-	return $profiles[ $model ] ?? [ 'effort' => false, 'thinking' => 'none', 'cache_min' => PHP_INT_MAX ];
+	$models = ism_ai_models();
+
+	if ( isset( $models[ $model ] ) ) {
+		return [
+			'effort'    => $models[ $model ]['effort'],
+			'thinking'  => $models[ $model ]['thinking'],
+			'cache_min' => $models[ $model ]['cache_min'],
+		];
+	}
+
+	return [ 'effort' => false, 'thinking' => 'none', 'cache_min' => PHP_INT_MAX ];
+}
+
+/**
+ * Models offered in the settings dropdown.
+ *
+ * Prices are per million tokens and exist so the admin screen can show the
+ * cost consequence of a choice next to the choice itself, rather than making
+ * someone go and look it up.
+ *
+ * @return array<string,array>
+ */
+function ism_ai_models(): array {
+	return [
+		'claude-haiku-4-5' => [
+			'label'     => 'Haiku 4.5 — cheapest',
+			'in'        => 1.00,
+			'out'       => 5.00,
+			'effort'    => false,
+			'thinking'  => 'none',
+			'cache_min' => 4096,
+			'note'      => 'Fastest and cheapest. Least reliable on fine colour distinctions, which matters when colour is a product attribute.',
+		],
+		'claude-sonnet-5' => [
+			'label'     => 'Sonnet 5 — balanced',
+			'in'        => 3.00,
+			'out'       => 15.00,
+			'effort'    => true,
+			'thinking'  => 'adaptive',
+			'cache_min' => 1024,
+			'note'      => 'Noticeably better on colour and material detail. A sensible default for product photography.',
+		],
+		'claude-opus-5' => [
+			'label'     => 'Opus 5 — most capable',
+			'in'        => 5.00,
+			'out'       => 25.00,
+			'effort'    => true,
+			'thinking'  => 'adaptive',
+			'cache_min' => 512,
+			'note'      => 'Best judgement on ambiguous imagery. Roughly eight times the cost of Haiku.',
+		],
+		'claude-opus-4-8' => [
+			'label'     => 'Opus 4.8 — previous generation',
+			'in'        => 5.00,
+			'out'       => 25.00,
+			'effort'    => true,
+			'thinking'  => 'adaptive',
+			'cache_min' => 1024,
+			'note'      => 'Kept for sites that validated against it and do not want the output to move.',
+		],
+	];
+}
+
+/**
+ * The model this site generates with.
+ *
+ * Settable from the admin screen; ISM_AI_MODEL is the fallback when nothing has
+ * been chosen, and an unrecognised stored value falls back rather than being
+ * sent to the API.
+ *
+ * @return string
+ */
+function ism_ai_get_model(): string {
+	$settings = ism_get_settings();
+	$model    = (string) ( $settings['ai_model'] ?? '' );
+
+	return isset( ism_ai_models()[ $model ] ) ? $model : ISM_AI_MODEL;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,7 +301,8 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 	$args = wp_parse_args( $args, [
 		'image_data_url' => '',
 		'dry_run'        => false,
-		'model'          => ISM_AI_MODEL,
+		'model'          => ism_ai_get_model(),
+		'override_skip'  => false,
 	] );
 
 	$model = (string) $args['model'];
@@ -244,9 +318,10 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 
 	$context = ism_context_for_attachment( $attachment_id );
 
-	// Decorative media is listed in the admin tab and never described. Enforced
-	// here as well as in the UI, so no future caller can route around it.
-	if ( ! empty( $context['skip'] ) ) {
+	// Decorative media is listed in the admin tab and never described unless the
+	// user overrides it for a specific image. The override is per call and never
+	// a stored default, so the safe behaviour stays the one you get by accident.
+	if ( ! empty( $context['skip'] ) && empty( $args['override_skip'] ) ) {
 		return new WP_Error(
 			'ism_ai_skipped',
 			sprintf(
