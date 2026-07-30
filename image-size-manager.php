@@ -100,6 +100,7 @@ add_action( 'wp_ajax_ism_hash_batch',     'ism_ajax_hash_batch' );
 add_action( 'wp_ajax_ism_seo_review',     'ism_ajax_seo_review' );
 add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
 add_action( 'wp_ajax_ism_seo_save_advanced', 'ism_ajax_seo_save_advanced' );
+add_action( 'wp_ajax_ism_seo_duplicates', 'ism_ajax_seo_duplicates' );
 
 // AJAX: usage index build (Image SEO tab depends on it)
 add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );

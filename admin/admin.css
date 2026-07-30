@@ -818,3 +818,73 @@
 .ism-estimate-warn { color: #8a5700; font-weight: 500; }
 .ism-estimate-blocked { color: #b32d2e; font-weight: 500; margin: 0; }
 .ism-seo-stats .ism-stat-open strong { color: #1d7e2d; }
+
+/* ── Duplicate review (read-only) ───────────────────────────────────────── */
+
+.ism-dupe-status { margin-left: 8px; }
+.ism-dupe-summary { margin: 14px 0; }
+.ism-seo-stats .ism-stat-warn strong { color: #b32d2e; }
+
+.ism-dupe-group {
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	margin-bottom: 16px;
+	background: #fff;
+}
+.ism-dupe-group-conflict { border-color: #f0b7b8; }
+
+.ism-dupe-group-head {
+	padding: 10px 14px;
+	border-bottom: 1px solid #dcdcde;
+	background: #f6f7f7;
+	border-radius: 4px 4px 0 0;
+}
+.ism-dupe-group-conflict .ism-dupe-group-head { background: #fcf0f1; border-bottom-color: #f0b7b8; }
+
+.ism-dupe-copies {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 0;
+}
+.ism-dupe-copy { padding: 14px; border-right: 1px solid #f0f0f1; }
+.ism-dupe-copy:last-child { border-right: none; }
+.ism-dupe-primary { background: #f7fbf7; }
+
+.ism-dupe-copy-head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.ism-dupe-copy-head img { object-fit: cover; border-radius: 3px; flex: none; }
+.ism-dupe-name { font-weight: 600; word-break: break-all; margin-top: 2px; }
+.ism-badge-keeper { background: #e3f5e6; color: #1d7e2d; margin: 0 0 3px; display: inline-block; }
+
+.ism-dupe-warn {
+	color: #b32d2e;
+	background: #fcf0f1;
+	border-left: 3px solid #b32d2e;
+	padding: 6px 10px;
+	margin: 8px 0;
+	font-size: 12px;
+}
+.ism-dupe-summary .ism-dupe-warn { font-size: 13px; max-width: 80ch; }
+
+.ism-dupe-checks { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0; padding: 0; list-style: none; font-size: 12px; }
+.ism-dupe-has { color: #1d7e2d; }
+.ism-dupe-hasnt { color: #a7aaad; }
+
+.ism-dupe-values { margin: 8px 0; }
+.ism-dupe-value { display: flex; gap: 6px; font-size: 12px; padding: 2px 0; }
+.ism-dupe-value span { color: #50575e; min-width: 78px; flex: none; }
+.ism-dupe-value em { font-style: normal; word-break: break-word; }
+.ism-dupe-empty { color: #a7aaad; font-style: italic !important; }
+
+.ism-dupe-usage { margin-top: 10px; font-size: 12px; }
+.ism-dupe-places { margin: 4px 0 0; padding-left: 16px; }
+.ism-dupe-places li { margin-bottom: 2px; }
+.ism-dupe-noplace { color: #8a5700; margin: 4px 0 0; }
+.ism-dupe-edit { margin: 10px 0 0; font-size: 12px; }
+
+.ism-dupe-note {
+	margin: 4px 0 0;
+	padding: 10px 14px;
+	background: #f6f7f7;
+	border-left: 3px solid #2271b1;
+	font-size: 13px;
+}

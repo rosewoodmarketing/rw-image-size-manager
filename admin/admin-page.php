@@ -755,6 +755,30 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<div class="ism-seo-pager ism-seo-pager-bottom"></div>
 			</div>
 
+			<!-- Duplicate review (read-only) ────────────────────────────── -->
+			<div class="ism-card" id="ism-seo-dupe-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Duplicate review', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Attachments that are byte-identical copies of each other. This panel is read-only — nothing here deletes, trashes, merges or repoints anything. It exists so you can see what each copy is and what still points at it before deciding anything.', 'image-size-manager' ); ?>
+				</p>
+
+				<p>
+					<button type="button" class="button" id="ism-dupe-toggle" aria-expanded="false">
+						<?php esc_html_e( 'Show duplicate review', 'image-size-manager' ); ?>
+						<span class="ism-advanced-caret">▸</span>
+					</button>
+					<span class="ism-dupe-status description"></span>
+				</p>
+
+				<div id="ism-dupe-panel" hidden>
+					<div class="ism-dupe-summary"></div>
+					<div id="ism-dupe-list"></div>
+					<p class="ism-dupe-note">
+						<?php esc_html_e( 'To remove a redundant copy, use Trash from its own edit screen after confirming nothing above still needs it.', 'image-size-manager' ); ?>
+					</p>
+				</div>
+			</div>
+
 			<!-- Generate ────────────────────────────────────────────────── -->
 			<div class="ism-card ism-bulk-card" id="ism-seo-generate-card" style="margin-top:18px; display:none">
 				<h4><?php esc_html_e( 'Step 3 — Generate proposals', 'image-size-manager' ); ?></h4>

@@ -1278,6 +1278,7 @@
 
 		$( '#ism-seo-summary' ).html( html ).show();
 		$( '#ism-seo-chart-card' ).show();
+		$( '#ism-seo-dupe-card' ).toggle( dupes > 0 );
 		$( '#ism-seo-generate-card' ).show();
 	}
 
@@ -1801,6 +1802,125 @@
 		}, function () {
 			$btn.prop( 'disabled', false );
 			$( '.ism-key-remove-status' ).text( 'Request failed.' );
+		} );
+	} );
+
+	// ── Duplicate review (read-only) ────────────────────────────────────────
+	//
+	// Nothing in here deletes, trashes, merges or repoints anything. Every copy
+	// links to its own attachment edit screen, and removing one is a deliberate
+	// act performed there by someone who has looked at what references it.
+
+	var seoDupesLoaded = false;
+
+	function seoDupeCopy( c, conflict ) {
+		var fields = [ [ 'title', 'Title' ], [ 'alt', 'Alt text' ], [ 'description', 'Description' ] ];
+
+		var checks = fields.map( function ( f ) {
+			var on = c.has[ f[ 0 ] ];
+			return '<li class="' + ( on ? 'ism-dupe-has' : 'ism-dupe-hasnt' ) + '">'
+				+ ( on ? '✓ ' : '— ' ) + esc( f[ 1 ] ) + '</li>';
+		} ).join( '' );
+
+		var values = [
+			[ 'Title', c.current.title ],
+			[ 'Alt text', c.current.alt_text ],
+			[ 'Description', c.current.description ]
+		].map( function ( v ) {
+			return '<div class="ism-dupe-value"><span>' + esc( v[ 0 ] ) + '</span>'
+				+ ( v[ 1 ]
+					? '<em title="' + esc( v[ 1 ] ) + '">' + esc( v[ 1 ].length > 120 ? v[ 1 ].slice( 0, 120 ) + '…' : v[ 1 ] ) + '</em>'
+					: '<em class="ism-dupe-empty">empty</em>' )
+				+ '</div>';
+		} ).join( '' );
+
+		var places = c.places.length
+			? '<ul class="ism-dupe-places">' + c.places.map( function ( p ) {
+				var label = esc( p.title || '(no title)' );
+				return '<li>' + ( p.link ? '<a href="' + esc( p.link ) + '" target="_blank">' + label + '</a>' : label )
+					+ ' <span class="description">' + esc( p.type ) + ( p.featured ? ' · featured' : '' ) + '</span></li>';
+			} ).join( '' ) + '</ul>'
+			: '<p class="ism-dupe-noplace">Nothing references this copy.</p>';
+
+		// Only meaningful when the keeper suggestion and actual usage disagree.
+		var warn = ( c.is_primary && conflict )
+			? '<p class="ism-dupe-warn">Suggested as keeper on metadata alone, but no page references it.</p>'
+			: '';
+
+		return '<div class="ism-dupe-copy' + ( c.is_primary ? ' ism-dupe-primary' : '' ) + '">'
+			+ '<div class="ism-dupe-copy-head">'
+			+ ( c.thumb ? '<img src="' + esc( c.thumb ) + '" alt="" width="64" height="64" loading="lazy" />' : '<span class="ism-seo-nothumb"></span>' )
+			+ '<div>'
+			+ ( c.is_primary ? '<span class="ism-badge ism-badge-keeper">suggested keeper</span>' : '' )
+			+ '<div class="ism-dupe-name">'
+			+ ( c.edit_url ? '<a href="' + esc( c.edit_url ) + '" target="_blank">' + esc( c.filename ) + '</a>' : esc( c.filename ) )
+			+ '</div>'
+			+ '<div class="description">#' + c.id + ' · uploaded ' + esc( c.uploaded )
+			+ ' · metadata ' + c.score + '/3 · used on ' + c.used_count + ' page' + ( c.used_count === 1 ? '' : 's' ) + '</div>'
+			+ '</div></div>'
+			+ warn
+			+ '<ul class="ism-dupe-checks">' + checks + '</ul>'
+			+ '<div class="ism-dupe-values">' + values + '</div>'
+			+ '<div class="ism-dupe-usage"><strong>References</strong>' + places + '</div>'
+			+ ( c.edit_url ? '<p class="ism-dupe-edit"><a href="' + esc( c.edit_url ) + '" target="_blank">Open this copy’s edit screen →</a></p>' : '' )
+			+ '</div>';
+	}
+
+	function seoRenderDupes( data ) {
+		var groups = data.groups || [];
+
+		$( '.ism-dupe-summary' ).html(
+			'<ul class="ism-seo-stats">'
+			+ '<li><strong>' + groups.length + '</strong> duplicate groups</li>'
+			+ '<li><strong>' + data.redundant + '</strong> redundant copies</li>'
+			+ ( data.conflicts ? '<li class="ism-stat-warn"><strong>' + data.conflicts + '</strong> where the suggested keeper is unused</li>' : '' )
+			+ '</ul>'
+			+ ( data.conflicts
+				? '<p class="ism-dupe-warn">The keeper suggestion scores metadata completeness only — it does not consider usage. In '
+					+ data.conflicts + ' group' + ( data.conflicts === 1 ? '' : 's' )
+					+ ' the suggested copy is referenced by no page while another copy is in use. Read the References list on each copy before removing anything.</p>'
+				: '' )
+		);
+
+		if ( ! groups.length ) {
+			$( '#ism-dupe-list' ).html( '<p class="description">No byte-identical duplicates found.</p>' );
+			return;
+		}
+
+		$( '#ism-dupe-list' ).html( groups.map( function ( g ) {
+			return '<div class="ism-dupe-group' + ( g.usage_conflict ? ' ism-dupe-group-conflict' : '' ) + '">'
+				+ '<div class="ism-dupe-group-head">'
+				+ '<strong>' + g.copies.length + ' identical copies</strong>'
+				+ ' <span class="description">' + esc( g.reason ) + '</span>'
+				+ '</div>'
+				+ '<div class="ism-dupe-copies">' + g.copies.map( function ( c ) {
+					return seoDupeCopy( c, g.usage_conflict );
+				} ).join( '' ) + '</div>'
+				+ '</div>';
+		} ).join( '' ) );
+	}
+
+	$( document ).on( 'click', '#ism-dupe-toggle', function () {
+		var $p   = $( '#ism-dupe-panel' );
+		var open = $p.is( '[hidden]' );
+
+		$p.attr( 'hidden', open ? null : 'hidden' );
+		$( this ).attr( 'aria-expanded', open ? 'true' : 'false' )
+			.find( '.ism-advanced-caret' ).text( open ? '▾' : '▸' );
+
+		if ( ! open || seoDupesLoaded ) { return; }
+
+		$( '.ism-dupe-status' ).text( 'Loading…' );
+		seoPost( 'ism_seo_duplicates', {}, function ( res ) {
+			if ( ! res.success ) {
+				$( '.ism-dupe-status' ).text( 'Could not load duplicates.' );
+				return;
+			}
+			seoDupesLoaded = true;
+			$( '.ism-dupe-status' ).text( '' );
+			seoRenderDupes( res.data );
+		}, function () {
+			$( '.ism-dupe-status' ).text( 'Request failed.' );
 		} );
 	} );
 
