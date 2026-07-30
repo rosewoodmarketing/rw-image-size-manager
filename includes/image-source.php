@@ -194,9 +194,27 @@ function ism_vision_pick_file( int $attachment_id ) {
 			continue;
 		}
 
+		$mime = ism_vision_mime_of( $path, (string) ( $size['mime-type'] ?? '' ) );
+
+		// A directly usable twin of the same file beats converting it. Checked
+		// within the chosen size tier rather than across tiers, so this never
+		// trades a cheap 300px request for an expensive 1024px one.
+		if ( ! in_array( $mime, ISM_VISION_MIME_OK, true ) ) {
+			$sibling = ism_vision_sibling(
+				$path,
+				(int) ( $size['width'] ?? 0 ),
+				(int) ( $size['height'] ?? 0 )
+			);
+
+			if ( $sibling !== null ) {
+				$sibling['size_name'] = $size_name;
+				return $sibling;
+			}
+		}
+
 		return [
 			'path'      => $path,
-			'mime'      => ism_vision_mime_of( $path, (string) ( $size['mime-type'] ?? '' ) ),
+			'mime'      => $mime,
 			'bytes'     => (int) filesize( $path ),
 			'size_name' => $size_name,
 		];
@@ -211,12 +229,116 @@ function ism_vision_pick_file( int $attachment_id ) {
 		);
 	}
 
+	$mime = ism_vision_mime_of( $original, (string) get_post_mime_type( $attachment_id ) );
+
+	if ( ! in_array( $mime, ISM_VISION_MIME_OK, true ) ) {
+		$sibling = ism_vision_sibling(
+			$original,
+			(int) ( $meta['width'] ?? 0 ),
+			(int) ( $meta['height'] ?? 0 )
+		);
+
+		if ( $sibling !== null ) {
+			$sibling['size_name'] = 'full';
+			return $sibling;
+		}
+	}
+
 	return [
 		'path'      => $original,
-		'mime'      => ism_vision_mime_of( $original, (string) get_post_mime_type( $attachment_id ) ),
+		'mime'      => $mime,
 		'bytes'     => (int) filesize( $original ),
 		'size_name' => 'full',
 	];
+}
+
+/**
+ * Find a directly usable file sitting beside one this host cannot read.
+ *
+ * Conversion plugins commonly write the converted image next to the original
+ * and leave the original in place — Elementor's Image Optimization does exactly
+ * this when "keep original images" is on, which is why a large share of an AVIF
+ * library has a PNG or JPEG twin. Reading that twin is better than converting
+ * anything: no transcode, no browser round trip, and no generation loss from
+ * re-encoding an already-lossy file.
+ *
+ * The dimension check is what makes this safe. Matching basenames alone would
+ * be a guess; matching pixels means it is the same picture. An exact match is
+ * required for sub-sizes, where both files were produced from one source. For
+ * originals the aspect ratio is compared instead, because a plugin that resizes
+ * on upload leaves the kept original at its pre-resize dimensions.
+ *
+ * @param string $path   File this host cannot use.
+ * @param int    $width  Expected width, 0 when unknown.
+ * @param int    $height Expected height, 0 when unknown.
+ * @return array{path:string, mime:string, bytes:int}|null
+ */
+function ism_vision_sibling( string $path, int $width, int $height ): ?array {
+	$base = preg_replace( '/\.[a-z0-9]+$/i', '', $path );
+	if ( ! is_string( $base ) || $base === '' ) {
+		return null;
+	}
+
+	foreach ( [ 'jpg', 'jpeg', 'png', 'webp', 'gif' ] as $ext ) {
+		$candidate = $base . '.' . $ext;
+
+		if ( $candidate === $path || ! ism_vision_readable( $candidate ) ) {
+			continue;
+		}
+
+		$info = @getimagesize( $candidate ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		if ( ! is_array( $info ) || empty( $info['mime'] ) ) {
+			continue;
+		}
+
+		if ( ! in_array( $info['mime'], ISM_VISION_MIME_OK, true ) ) {
+			continue;
+		}
+
+		if ( ! ism_vision_dimensions_match( $width, $height, (int) $info[0], (int) $info[1] ) ) {
+			continue;
+		}
+
+		return [
+			'path'  => $candidate,
+			'mime'  => (string) $info['mime'],
+			'bytes' => (int) filesize( $candidate ),
+		];
+	}
+
+	return null;
+}
+
+/**
+ * Whether two images are the same picture, by size or by shape.
+ *
+ * @param int $expected_w
+ * @param int $expected_h
+ * @param int $actual_w
+ * @param int $actual_h
+ * @return bool
+ */
+function ism_vision_dimensions_match( int $expected_w, int $expected_h, int $actual_w, int $actual_h ): bool {
+	if ( $actual_w < 1 || $actual_h < 1 ) {
+		return false;
+	}
+
+	// Nothing to compare against: refuse rather than guess, since the whole
+	// point of this check is to be sure it is the same image.
+	if ( $expected_w < 1 || $expected_h < 1 ) {
+		return false;
+	}
+
+	if ( $expected_w === $actual_w && $expected_h === $actual_h ) {
+		return true;
+	}
+
+	// Same shape at a different scale — the resized-on-upload case. One percent
+	// absorbs the rounding in whichever resize produced the smaller copy.
+	$expected_ratio = $expected_w / $expected_h;
+	$actual_ratio   = $actual_w / $actual_h;
+
+	return abs( $expected_ratio - $actual_ratio ) <= ( $expected_ratio * 0.01 );
 }
 
 /**

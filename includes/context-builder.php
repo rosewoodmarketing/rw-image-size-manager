@@ -78,7 +78,6 @@ function ism_context_for_attachment( int $attachment_id ): array {
 	if ( $skip !== '' ) {
 		$context['skip']        = true;
 		$context['skip_reason'] = $skip;
-		return $context;
 	}
 
 	$usages = ism_usage_get_detailed( $attachment_id );
@@ -98,9 +97,25 @@ function ism_context_for_attachment( int $attachment_id ): array {
 		return $rank( $a ) <=> $rank( $b );
 	} );
 
-	foreach ( array_slice( $usages, 0, ISM_CONTEXT_MAX_POSTS ) as $usage ) {
-		$usage['text'] = ism_context_post_text( (int) $usage['post_id'] );
-		$usage['seo']  = ism_context_post_seo( (int) $usage['post_id'] );
+	// Skipped media still gets its usage list. An SVG is never described by the
+	// generator, but it is still listed in the admin tab so a dev can rename it
+	// by hand or merge a duplicate, and both of those need to know where it
+	// appears. The whole list is kept in that case rather than the first few,
+	// because a merge has to repoint every reference, not a sample of them.
+	//
+	// Only the expensive half is conditional: walking each referencing page for
+	// prose and SEO fields exists to feed a prompt, and there is no prompt here.
+	$limit = $context['skip'] ? count( $usages ) : ISM_CONTEXT_MAX_POSTS;
+
+	foreach ( array_slice( $usages, 0, $limit ) as $usage ) {
+		$usage['text'] = '';
+		$usage['seo']  = [ 'focus_keyword' => '', 'meta_description' => '' ];
+
+		if ( ! $context['skip'] ) {
+			$usage['text'] = ism_context_post_text( (int) $usage['post_id'] );
+			$usage['seo']  = ism_context_post_seo( (int) $usage['post_id'] );
+		}
+
 		$context['usages'][] = $usage;
 	}
 
