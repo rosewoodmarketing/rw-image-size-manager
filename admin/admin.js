@@ -1211,6 +1211,14 @@
 		seoGroups.sort( function ( a, b ) { return a.rep.id - b.rep.id; } );
 	}
 
+	// A proposal that is still awaiting a decision. Applying and discarding both
+	// remove it from seoProposals, so "generated but not yet applied" needs no
+	// extra bookkeeping — a live proposal with no error is exactly that.
+	function seoHasOpenProposal( g ) {
+		var p = seoGroupProposal( g );
+		return !! ( p && ! p.error );
+	}
+
 	function seoGroupProposal( g ) {
 		for ( var i = 0; i < g.ids.length; i++ ) {
 			if ( seoProposals[ String( g.ids[ i ] ) ] ) { return seoProposals[ String( g.ids[ i ] ) ]; }
@@ -1236,12 +1244,18 @@
 	// ── Summary ─────────────────────────────────────────────────────────────
 
 	function seoRenderSummary() {
-		var ready = 0, skipped = 0, unused = 0, dupes = 0, client = 0, noalt = 0;
+		if ( ! seoGroups.length ) {
+			$( '#ism-seo-summary' ).hide();
+			return;
+		}
+
+		var ready = 0, skipped = 0, unused = 0, dupes = 0, client = 0, noalt = 0, open = 0;
 		seoGroups.forEach( function ( g ) {
 			if ( g.group === 'ready' ) { ready++; } else if ( g.group === 'unused' ) { unused++; } else { skipped++; }
 			if ( g.copies > 1 ) { dupes++; }
 			if ( g.needs_client ) { client++; }
 			if ( g.group === 'ready' && ! g.rep.current.alt_text ) { noalt++; }
+			if ( seoHasOpenProposal( g ) ) { open++; }
 		} );
 
 		var html = '<ul class="ism-seo-stats">'
@@ -1251,6 +1265,7 @@
 			+ '<li><strong>' + skipped + '</strong> decorative / unsupported</li>'
 			+ '<li><strong>' + unused + '</strong> on no page</li>'
 			+ '<li><strong>' + dupes + '</strong> duplicate groups</li>'
+			+ ( open ? '<li class="ism-stat-open"><strong>' + open + '</strong> awaiting apply</li>' : '' )
 			+ '</ul>';
 
 		if ( seoRows.length > seoGroups.length ) {
@@ -1279,6 +1294,7 @@
 			if ( g.reviewed && ! showReviewed ) { return false; }
 
 			if ( filter === 'ready'   && g.group !== 'ready' ) { return false; }
+			if ( filter === 'proposals' && ! seoHasOpenProposal( g ) ) { return false; }
 			if ( filter === 'noalt'   && ( g.group !== 'ready' || g.rep.current.alt_text ) ) { return false; }
 			if ( filter === 'skipped' && g.group !== 'skipped' ) { return false; }
 			if ( filter === 'unused'  && g.group !== 'unused' ) { return false; }
@@ -1391,6 +1407,11 @@
 	}
 
 	function seoRenderChart() {
+		// Redrawn alongside the chart rather than only after a scan: the
+		// awaiting-apply count moves every time something is generated, applied
+		// or discarded, and a stale headline is worse than none.
+		seoRenderSummary();
+
 		var vis = seoVisibleGroups();
 		var checked = 0;
 		seoGroups.forEach( function ( g ) { if ( seoChecked[ g.key ] ) { checked++; } } );
@@ -1683,9 +1704,20 @@
 		} );
 		$( '#ism-seo-review-card' ).toggle( pending.length > 0 );
 		$( '#ism-seo-review-list' ).html( pending.length
-			? '<p class="description">' + pending.length + ' image(s) have unapplied changes. Review them in the chart above, tick the ones you want, then Apply.</p>'
+			? '<p class="description">' + pending.length + ' image(s) have unapplied changes. '
+				+ '<button type="button" class="button button-small ism-seo-goto-proposals">Show only these</button> '
+				+ 'then tick the ones you want and Apply.</p>'
 			: '' );
 	}
+
+	$( document ).on( 'click', '.ism-seo-goto-proposals', function () {
+		$( '#ism-seo-filter' ).val( 'proposals' );
+		$( '#ism-seo-search' ).val( '' );
+		seoPage = 1;
+		seoRenderChart();
+		var top = $( '#ism-seo-chart-card' ).offset();
+		if ( top ) { $( 'html, body' ).animate( { scrollTop: top.top - 40 }, 150 ); }
+	} );
 
 	$( document ).on( 'click', '#ism-seo-apply', function () {
 		var rows = [];

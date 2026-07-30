@@ -817,3 +817,4 @@
 .ism-seo-estimate p { margin: 6px 0 0; }
 .ism-estimate-warn { color: #8a5700; font-weight: 500; }
 .ism-estimate-blocked { color: #b32d2e; font-weight: 500; margin: 0; }
+.ism-seo-stats .ism-stat-open strong { color: #1d7e2d; }

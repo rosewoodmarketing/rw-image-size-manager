@@ -729,6 +729,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 						<?php esc_html_e( 'Show', 'image-size-manager' ); ?>
 						<select id="ism-seo-filter">
 							<option value="ready"><?php esc_html_e( 'Ready to generate', 'image-size-manager' ); ?></option>
+							<option value="proposals"><?php esc_html_e( 'Proposals — generated, not yet applied', 'image-size-manager' ); ?></option>
 							<option value="noalt"><?php esc_html_e( 'Ready, missing alt text', 'image-size-manager' ); ?></option>
 							<option value="missing"><?php esc_html_e( 'Missing any field', 'image-size-manager' ); ?></option>
 							<option value="missing_title"><?php esc_html_e( 'Missing title', 'image-size-manager' ); ?></option>
