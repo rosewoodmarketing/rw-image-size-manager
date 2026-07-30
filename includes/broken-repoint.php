@@ -500,3 +500,197 @@ function ism_ajax_repoint_apply(): void {
 
 	wp_send_json_success( $result );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Site-wide URL repointing
+//
+// The per-reference functions above fix one broken reference a human has
+// reviewed. This is the other shape: a tool is about to rename or delete a
+// file it knows the new location of, and every page pointing at the old one
+// has to follow. No judgement is involved — the mapping is certain — so it
+// runs without review, but only ever from a tool that is itself making the
+// change.
+//
+// This is the gap that broke images on the pilot site. Both bulk tools moved
+// the file and repointed the media library, which is what their UI copy said
+// they did, while every page that had already inserted the old URL kept
+// pointing at a file that no longer existed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every URL form that resolves to one file: the file itself and its sized
+ * variants.
+ *
+ * A page rarely stores the bare original — it stores `name-1024x768.jpg` in an
+ * img src and the whole set again in srcset. Replacing only the exact URL
+ * leaves those pointing at a deleted file.
+ *
+ * @param string $url
+ * @return string Regex matching the URL and any -WxH variant of it.
+ */
+function ism_repoint_url_pattern( string $url ): string {
+	$dir  = dirname( $url );
+	$base = basename( $url );
+	$ext  = pathinfo( $base, PATHINFO_EXTENSION );
+	$stem = preg_replace( '/\.[a-z0-9]+$/i', '', $base );
+
+	return '~' . preg_quote( $dir, '~' ) . '/' . preg_quote( (string) $stem, '~' )
+		. '(?:-\d+x\d+)?\.' . preg_quote( $ext, '~' ) . '~i';
+}
+
+/**
+ * Rewrite every reference to one URL, across post content and Elementor data.
+ *
+ * @param string $old_url
+ * @param string $new_url
+ * @param bool   $write   False to report what would change without changing it.
+ * @return array{posts:int[], content:int, elementor:int}
+ */
+function ism_repoint_url_sitewide( string $old_url, string $new_url, bool $write = true ): array {
+	global $wpdb;
+
+	$result = [ 'posts' => [], 'content' => 0, 'elementor' => 0 ];
+
+	if ( $old_url === '' || $new_url === '' || $old_url === $new_url ) {
+		return $result;
+	}
+
+	$pattern = ism_repoint_url_pattern( $old_url );
+
+	// Matched on the filename stem so a slashed or protocol-relative copy of
+	// the same URL is still found.
+	$needle = '%' . $wpdb->esc_like( preg_replace( '/\.[a-z0-9]+$/i', '', basename( $old_url ) ) ) . '%';
+
+	// ── post_content ─────────────────────────────────────────────────────────
+	$rows = $wpdb->get_results( $wpdb->prepare(
+		"SELECT ID, post_content FROM {$wpdb->posts}
+		 WHERE post_content LIKE %s
+		   AND post_type NOT IN ( 'revision', 'attachment' )
+		   AND post_status NOT IN ( 'auto-draft', 'trash' )",
+		$needle
+	) );
+
+	foreach ( $rows as $row ) {
+		$updated = preg_replace( $pattern, $new_url, (string) $row->post_content, -1, $hits );
+		if ( ! $hits || ! is_string( $updated ) ) {
+			continue;
+		}
+
+		$result['content'] += $hits;
+		$result['posts'][]  = (int) $row->ID;
+
+		if ( $write ) {
+			wp_update_post( [ 'ID' => (int) $row->ID, 'post_content' => wp_slash( $updated ) ] );
+		}
+	}
+
+	// ── _elementor_data ──────────────────────────────────────────────────────
+	//
+	// Joined to posts and filtered to live content. Elementor writes
+	// _elementor_data onto every revision, and on this site that is 3,612 rows
+	// against 70 real ones — rewriting them would be slow, would bloat the
+	// database, and would silently edit history nobody asked to change.
+	$meta = $wpdb->get_results( $wpdb->prepare(
+		"SELECT m.post_id, m.meta_value
+		 FROM {$wpdb->postmeta} m
+		 INNER JOIN {$wpdb->posts} p ON p.ID = m.post_id
+		 WHERE m.meta_key = '_elementor_data'
+		   AND m.meta_value LIKE %s
+		   AND p.post_type NOT IN ( 'revision', 'attachment' )
+		   AND p.post_status NOT IN ( 'auto-draft', 'trash' )",
+		$needle
+	) );
+
+	foreach ( $meta as $row ) {
+		$raw  = (string) $row->meta_value;
+		$data = json_decode( $raw, true );
+
+		// A page whose builder data will not decode is left alone and reported
+		// rather than string-replaced: a bad substitution inside that JSON
+		// breaks the whole layout, which is worse than a stale URL.
+		if ( ! is_array( $data ) ) {
+			continue;
+		}
+
+		$hits = 0;
+		ism_repoint_walk_urls( $data, $pattern, $new_url, $hits );
+
+		if ( ! $hits ) {
+			continue;
+		}
+
+		$result['elementor'] += $hits;
+		$result['posts'][]    = (int) $row->post_id;
+
+		if ( $write ) {
+			$encoded = wp_json_encode( $data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+			if ( is_string( $encoded ) ) {
+				update_post_meta( (int) $row->post_id, '_elementor_data', wp_slash( $encoded ) );
+				ism_repoint_clear_elementor_cache( (int) $row->post_id );
+			}
+		}
+	}
+
+	$result['posts'] = array_values( array_unique( $result['posts'] ) );
+
+	return $result;
+}
+
+/**
+ * Replace matching URLs anywhere in a decoded Elementor tree.
+ *
+ * Every string is considered, not just media-control `url` keys: background
+ * images, srcset copies and inline HTML widgets all hold the same URL in
+ * different shapes.
+ *
+ * @param array  $node
+ * @param string $pattern
+ * @param string $new_url
+ * @param int    &$hits
+ */
+function ism_repoint_walk_urls( array &$node, string $pattern, string $new_url, int &$hits ): void {
+	foreach ( $node as $key => &$value ) {
+		if ( is_array( $value ) ) {
+			ism_repoint_walk_urls( $value, $pattern, $new_url, $hits );
+			continue;
+		}
+
+		if ( ! is_string( $value ) || $value === '' ) {
+			continue;
+		}
+
+		$replaced = preg_replace( $pattern, $new_url, $value, -1, $n );
+		if ( $n && is_string( $replaced ) ) {
+			$value = $replaced;
+			$hits += $n;
+		}
+	}
+}
+
+/**
+ * Repoint references after a tool has moved an attachment's file.
+ *
+ * Called by the bulk tools with the paths they are about to change between.
+ *
+ * @param int    $attachment_id
+ * @param string $old_path Absolute path the attachment used to live at.
+ * @param string $new_path Absolute path it now lives at.
+ * @return array
+ */
+function ism_repoint_after_file_move( int $attachment_id, string $old_path, string $new_path ): array {
+	$uploads = wp_get_upload_dir();
+
+	$to_url = function ( string $path ) use ( $uploads ) {
+		$relative = _wp_relative_upload_path( $path );
+		return $relative ? trailingslashit( $uploads['baseurl'] ) . $relative : '';
+	};
+
+	$old_url = $to_url( $old_path );
+	$new_url = $to_url( $new_path );
+
+	if ( $old_url === '' || $new_url === '' ) {
+		return [ 'posts' => [], 'content' => 0, 'elementor' => 0 ];
+	}
+
+	return ism_repoint_url_sitewide( $old_url, $new_url, true );
+}

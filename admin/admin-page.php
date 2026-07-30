@@ -976,14 +976,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<div class="ism-card ism-bulk-card" style="margin-top:18px">
 				<h4><?php esc_html_e( 'Remove WordPress -scaled Images', 'image-size-manager' ); ?></h4>
 				<p class="description">
-					<?php esc_html_e( 'WordPress automatically creates a -scaled version of any image larger than 2560px. This tool deletes those -scaled files from disk and repoints the media library to the original file.', 'image-size-manager' ); ?>
+					<?php esc_html_e( 'WordPress automatically creates a -scaled version of any image larger than 2560px. This tool deletes those -scaled files from disk, repoints the media library to the original file, and rewrites any page, template or custom field that already pointed at the -scaled version so nothing is left referencing a deleted file.', 'image-size-manager' ); ?>
 				</p>
 
 				<?php if ( $below_threshold ) : ?>
 				<p class="description" style="color:#1d7e2d; margin-top:6px; font-weight:500">
 					<?php
 					printf(
-						esc_html__( '✓ WordPress -scaled images are disabled. Your Max Upload size (%dpx) is below WordPress\'s 2560px threshold, so -scaled files will never be created on new uploads — it is safe to remove any existing ones.', 'image-size-manager' ),
+						esc_html__( '✓ WordPress -scaled images are disabled. Your Max Upload size (%dpx) is below WordPress\'s 2560px threshold, so no new -scaled files will be created. Existing pages that already reference a -scaled file are rewritten to follow it.', 'image-size-manager' ),
 						esc_html( $scaling_limit )
 					);
 					?>
