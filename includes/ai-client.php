@@ -19,12 +19,17 @@
  * Three things about the current API are easy to get wrong and are handled
  * deliberately below:
  *
- *   1. `temperature`, `top_p`, `top_k` and `budget_tokens` are rejected with a
- *      400 on this model. None of them are sent. Depth is set with `effort`,
- *      which lives inside `output_config`, not at the top level.
- *   2. Thinking is on by default, and `max_tokens` caps thinking *plus* the
- *      response text together. ISM_AI_MAX_TOKENS is sized for both, not for
- *      the ~200 tokens of JSON that come back.
+ *   1. Which optional parameters a model accepts is not uniform, and the
+ *      failure mode is a 400 on every request rather than a silently ignored
+ *      field. `effort` is accepted by the Opus and Sonnet models and rejected
+ *      by Haiku; `temperature`, `top_p`, `top_k` and `budget_tokens` are
+ *      rejected by the current Opus and Sonnet models. None of the sampling
+ *      parameters are ever sent, and `effort` is gated on
+ *      ism_ai_model_profile() so that changing ISM_AI_MODEL stays a one-line
+ *      edit.
+ *   2. On a thinking model, `max_tokens` caps thinking *plus* the response
+ *      text together, so ISM_AI_MAX_TOKENS is sized for both rather than for
+ *      the ~250 tokens of JSON that come back.
  *   3. A safety classifier can decline a request and still return HTTP 200,
  *      with `stop_reason` of "refusal" and an empty or partial content array.
  *      Reading content[0] before checking stop_reason would fatal mid-batch.
@@ -41,19 +46,43 @@ define( 'ISM_AI_KEY_OPTION', 'ism_anthropic_api_key' );
 
 define( 'ISM_AI_ENDPOINT', 'https://api.anthropic.com/v1/messages' );
 define( 'ISM_AI_VERSION', '2023-06-01' );
-define( 'ISM_AI_MODEL', 'claude-opus-5' );
 
 /**
- * Reasoning depth. Inside output_config, not top level.
+ * Model used for generation. Change this per deployment.
  *
- * Describing a photograph is not an intelligence-sensitive task, and cost here
- * is multiplied by the size of the library — 791 generatable images on the
- * pilot site. Low is the deliberate starting point; raise it only if a sample
- * of real output justifies the spend.
+ * Describing a photograph is a well-scoped, high-volume task, and cost is
+ * multiplied by the size of the library — 791 generatable images on the pilot
+ * site alone, before any re-run. The cheapest model that does the job is the
+ * right default; the ladder, cheapest first:
+ *
+ *   claude-haiku-4-5   $1 / $5 per MTok    vision + structured outputs, no effort
+ *   claude-sonnet-5    $3 / $15            full effort range
+ *   claude-opus-5      $5 / $25            full effort range
+ *
+ * Model capabilities differ in ways that make a bare swap unsafe, which is
+ * what ism_ai_model_profile() exists to absorb — see the note there before
+ * changing this to something not in that table.
+ */
+define( 'ISM_AI_MODEL', 'claude-haiku-4-5' );
+
+/**
+ * Reasoning depth, for models that support it. Inside output_config, not top
+ * level.
+ *
+ * Ignored entirely on a model whose profile reports no effort support, because
+ * sending it there is a 400 rather than a no-op. Set to an empty string to omit
+ * it even on a model that would accept it.
  */
 define( 'ISM_AI_EFFORT', 'low' );
 
-/** Budget for thinking and response text combined, not just the JSON. */
+/**
+ * Response ceiling.
+ *
+ * Only ~250 tokens of JSON come back, so this is mostly headroom. It stays
+ * generous because on a thinking model the same budget has to cover thinking
+ * as well as the reply — see ism_ai_model_profile(). max_tokens is a ceiling,
+ * not a reservation; unused budget is not billed.
+ */
 define( 'ISM_AI_MAX_TOKENS', 2000 );
 
 /** WordPress defaults to 5 seconds, which this call will exceed. */
@@ -113,6 +142,59 @@ function ism_ai_has_key(): bool {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Model capabilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the configured model will actually accept.
+ *
+ * Changing ISM_AI_MODEL is meant to be a one-line edit, and it only stays that
+ * way because the differences between models live here rather than inline in
+ * the request. The differences are not cosmetic: sending `effort` to a model
+ * that does not support it is a 400 on every request, not a silently ignored
+ * field, so a bare constant swap to Haiku would break generation outright.
+ *
+ * Fields:
+ *
+ *   effort     Whether output_config.effort is accepted at all.
+ *   thinking   'none'     — the model does not think unless asked, and this
+ *                           file never asks. What Haiku does.
+ *              'adaptive' — thinks by default. max_tokens then covers thinking
+ *                           *and* the reply, so keep ISM_AI_MAX_TOKENS well
+ *                           above the ~250 tokens of JSON. Do not "save money"
+ *                           by disabling it on Opus 5: with thinking off that
+ *                           model can leak internal XML into the visible
+ *                           response, which corrupts the JSON being parsed.
+ *                           Lower effort is the cost lever instead.
+ *   cache_min  Minimum promptable prefix, in tokens, before a cache_control
+ *              marker does anything. Below it caching silently no-ops — no
+ *              error, just cache_read_input_tokens of 0 forever. The system
+ *              prompt here is a few hundred tokens, so on Haiku's 4096 floor
+ *              the marker never engages. That is expected, not a bug.
+ *
+ * Verified against GET /v1/models/{id} rather than assumed. Re-check there
+ * when adding a row: `capabilities.effort.supported`,
+ * `capabilities.thinking.types.adaptive.supported`, `capabilities.image_input`.
+ *
+ * An unrecognised model gets the conservative profile — no optional knobs sent
+ * — which is a valid request everywhere and degrades quality rather than
+ * failing outright.
+ *
+ * @param string $model
+ * @return array{effort:bool, thinking:string, cache_min:int}
+ */
+function ism_ai_model_profile( string $model = ISM_AI_MODEL ): array {
+	$profiles = [
+		'claude-haiku-4-5' => [ 'effort' => false, 'thinking' => 'none',     'cache_min' => 4096 ],
+		'claude-sonnet-5'  => [ 'effort' => true,  'thinking' => 'adaptive', 'cache_min' => 1024 ],
+		'claude-opus-5'    => [ 'effort' => true,  'thinking' => 'adaptive', 'cache_min' => 512 ],
+		'claude-opus-4-8'  => [ 'effort' => true,  'thinking' => 'adaptive', 'cache_min' => 1024 ],
+	];
+
+	return $profiles[ $model ] ?? [ 'effort' => false, 'thinking' => 'none', 'cache_min' => PHP_INT_MAX ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public entry point — one attachment
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -133,6 +215,9 @@ function ism_ai_has_key(): bool {
  *     @type string $image_data_url Pre-converted image from the browser, for
  *                                  hosts that cannot decode the source format.
  *     @type bool   $dry_run        Build and return the request without sending.
+ *     @type string $model          Override ISM_AI_MODEL for this call only, to
+ *                                  compare models on one known image before
+ *                                  committing a deployment to one.
  * }
  * @return array{
  *     attachment_id:int, result:?array, raw:string, prompt:string,
@@ -143,7 +228,10 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 	$args = wp_parse_args( $args, [
 		'image_data_url' => '',
 		'dry_run'        => false,
+		'model'          => ISM_AI_MODEL,
 	] );
+
+	$model = (string) $args['model'];
 
 	// Checked first so a site with no key never builds a request, never reaches
 	// wp_remote_post, and never spends time on context or image decoding.
@@ -175,14 +263,34 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		return $image;
 	}
 
-	$prompt = ism_context_render( $context );
+	$prompt  = ism_context_render( $context );
+	$profile = ism_ai_model_profile( $model );
+
+	// format constrains the response to the schema server-side, which is a
+	// second line of defence rather than a replacement for
+	// ism_ai_parse_response() — a refusal can still return something that does
+	// not match the schema.
+	$output_config = [
+		'format' => [
+			'type'   => 'json_schema',
+			'schema' => ism_ai_output_schema(),
+		],
+	];
+
+	// effort belongs inside output_config, not at the top level — and only on a
+	// model that accepts it. On one that does not, sending it fails the request
+	// outright rather than being ignored.
+	if ( $profile['effort'] && ISM_AI_EFFORT !== '' ) {
+		$output_config['effort'] = ISM_AI_EFFORT;
+	}
 
 	$body = [
-		'model'      => ISM_AI_MODEL,
+		'model'      => $model,
 		'max_tokens' => ISM_AI_MAX_TOKENS,
 
 		// Stable across every image in a run, so it sits first and carries the
-		// cache breakpoint. Below the cacheable minimum it simply does nothing.
+		// cache breakpoint. Below the model's cacheable minimum it silently
+		// does nothing, which is the case on Haiku — see ism_ai_model_profile().
 		'system'     => [
 			[
 				'type'          => 'text',
@@ -191,17 +299,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 			],
 		],
 
-		// effort belongs inside output_config, not at the top level. format
-		// constrains the response to the schema server-side, which is a second
-		// line of defence rather than a replacement for ism_ai_parse_response()
-		// — a refusal can still return something that does not match.
-		'output_config' => [
-			'effort' => ISM_AI_EFFORT,
-			'format' => [
-				'type'   => 'json_schema',
-				'schema' => ism_ai_output_schema(),
-			],
-		],
+		'output_config' => $output_config,
 
 		'messages' => [
 			[
@@ -214,8 +312,10 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		],
 	];
 
-	// No temperature, top_p, top_k or thinking budget: all four are rejected
-	// with a 400 on this model. Thinking runs adaptively by default.
+	// No temperature, top_p, top_k or thinking configuration is sent. The
+	// sampling parameters are rejected outright on the current Opus and Sonnet
+	// models, and thinking is left at each model's default: off on Haiku,
+	// adaptive on the thinking models.
 
 	if ( $args['dry_run'] ) {
 		// The image payload is megabytes of base64 and unreadable; summarise it
@@ -233,7 +333,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 			'raw'           => '',
 			'prompt'        => $prompt,
 			'usage'         => ism_ai_empty_usage(),
-			'model'         => ISM_AI_MODEL,
+			'model'         => $model,
 			'stop_reason'   => 'dry_run',
 			'image'         => $image['meta'],
 			'request'       => $preview,
@@ -253,7 +353,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'raw'           => $text,
 		'prompt'        => $prompt,
 		'usage'         => ism_ai_usage( $response ),
-		'model'         => (string) ( $response['model'] ?? ISM_AI_MODEL ),
+		'model'         => (string) ( $response['model'] ?? $model ),
 		'stop_reason'   => (string) ( $response['stop_reason'] ?? '' ),
 		'image'         => $image['meta'],
 	];
