@@ -1,4 +1,4 @@
-# RW Image Size Manager
+# RW Image Manager
 
 **Version:** 1.3.0  
 **Author:** Anthony Burkholder  
@@ -6,7 +6,9 @@
 **Requires WordPress:** 6.0+  
 **Tested up to:** 6.9  
 
-A WordPress admin plugin for viewing, toggling, and customizing image sizes across the entire site — including per-post-type allowlists, custom size registration, original-upload dimension limits, thumbnail regeneration, a media log, and an orphaned-file scanner.
+A WordPress admin plugin for managing images across an entire site: image sizes and per-post-type allowlists, custom size registration, original-upload dimension limits, thumbnail regeneration, a media log, an orphaned-file scanner, and — from 2.0.0 — page-context-aware AI generation of image titles, alt text and descriptions, duplicate review, and broken-image detection and repair.
+
+**Team workflow guide:** see [TEAM-GUIDE.md](TEAM-GUIDE.md) for the end-to-end process.
 
 ---
 

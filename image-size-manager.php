@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name:       RW Image Size Manager
+ * Plugin Name:       RW Image Manager
  * Plugin URI:        https://github.com/rosewoodmarketing/rw-image-size-manager
  * Description:       View, toggle, customize, and add image sizes. Per-post-type size allowlists, max upload dimensions, bulk thumbnail regeneration, a media log, and an orphaned-file scanner.
  * Version:           1.3.0
@@ -781,8 +781,8 @@ function ism_add_admin_menu(): void {
 	// plugin to an update, and renaming them would strand every site already
 	// receiving updates through the GitHub updater.
 	add_menu_page(
-		__( 'Image Manager', 'image-size-manager' ),
-		__( 'Image Manager', 'image-size-manager' ),
+		__( 'RW Image Manager', 'image-size-manager' ),
+		__( 'RW Image Manager', 'image-size-manager' ),
 		'manage_options',
 		'image-size-manager',
 		'ism_render_admin_page',

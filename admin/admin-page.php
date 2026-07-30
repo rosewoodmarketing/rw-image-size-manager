@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 ?>
 <div class="wrap ism-wrap">
-	<h1><?php esc_html_e( 'Image Manager', 'image-size-manager' ); ?></h1>
+	<h1><?php esc_html_e( 'RW Image Manager', 'image-size-manager' ); ?></h1>
 
 	<?php if ( $saved ) : ?>
 		<div class="notice notice-success is-dismissible">
