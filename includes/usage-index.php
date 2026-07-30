@@ -382,6 +382,61 @@ function ism_usage_filter_image_attachments( array $ids ): array {
 	return array_map( 'intval', $wpdb->get_col( $sql ) );
 }
 
+/**
+ * Count the attachments that currently carry a usage record.
+ *
+ * Recalculated rather than accumulated, because one attachment is touched once
+ * per referencing post and a running total would over-count.
+ *
+ * @return int
+ */
+function ism_usage_count_indexed(): int {
+	global $wpdb;
+
+	return (int) $wpdb->get_var(
+		$wpdb->prepare(
+			"SELECT COUNT(DISTINCT post_id) FROM {$wpdb->postmeta} WHERE meta_key = %s",
+			ISM_USAGE_META_KEY
+		)
+	);
+}
+
+/**
+ * Record a completed build.
+ *
+ * @param int $posts_indexed
+ */
+function ism_usage_set_status( int $posts_indexed ): void {
+	update_option( ISM_USAGE_STATE_KEY, [
+		'built_at'          => time(),
+		'posts_indexed'     => $posts_indexed,
+		'attachments_found' => ism_usage_count_indexed(),
+		'running'           => false,
+	], false );
+}
+
+/**
+ * Build the whole index in one synchronous pass.
+ *
+ * Intended for WP-CLI and testing. The admin UI uses the batched AJAX handlers
+ * instead, since a large site will exceed a single request's time limit.
+ *
+ * @return array Status array, as returned by ism_usage_index_status().
+ */
+function ism_usage_build_all(): array {
+	ism_usage_clear_all();
+
+	$ids = ism_usage_collect_post_ids();
+
+	foreach ( array_chunk( $ids, ISM_USAGE_BATCH_SIZE ) as $chunk ) {
+		ism_usage_index_posts( $chunk );
+	}
+
+	ism_usage_set_status( count( $ids ) );
+
+	return ism_usage_index_status();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AJAX — init / batch, following the regen_all pattern
 // ─────────────────────────────────────────────────────────────────────────────
@@ -472,25 +527,8 @@ function ism_ajax_usage_index_batch(): void {
 
 	if ( $done ) {
 		delete_option( $state_key );
-
-		// Attachment count is recalculated rather than accumulated, since the
-		// same image is touched by several batches when used on several pages.
-		global $wpdb;
-		$distinct = (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT(DISTINCT post_id) FROM {$wpdb->postmeta} WHERE meta_key = %s",
-				ISM_USAGE_META_KEY
-			)
-		);
-
-		update_option( ISM_USAGE_STATE_KEY, [
-			'built_at'          => time(),
-			'posts_indexed'     => count( $ids ),
-			'attachments_found' => $distinct,
-			'running'           => false,
-		], false );
-
-		$found = $distinct;
+		ism_usage_set_status( count( $ids ) );
+		$found = ism_usage_count_indexed();
 	} else {
 		update_option( $state_key, [
 			'ids'    => $ids,
