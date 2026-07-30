@@ -100,6 +100,7 @@ add_action( 'wp_ajax_ism_seo_apply',      'ism_ajax_seo_apply' );
 add_action( 'wp_ajax_ism_seo_reset',      'ism_ajax_seo_reset' );
 add_action( 'wp_ajax_ism_hash_batch',     'ism_ajax_hash_batch' );
 add_action( 'wp_ajax_ism_seo_review',     'ism_ajax_seo_review' );
+add_action( 'wp_ajax_ism_seo_reject',     'ism_ajax_seo_reject' );
 add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
 add_action( 'wp_ajax_ism_seo_save_advanced', 'ism_ajax_seo_save_advanced' );
 add_action( 'wp_ajax_ism_seo_duplicates', 'ism_ajax_seo_duplicates' );
@@ -775,9 +776,13 @@ function ism_regen_attachment( int $attachment_id, string $cpt_key ) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ism_add_admin_menu(): void {
+	// Display text only. The menu slug, directory name, ism_ prefix and ISM_
+	// constants stay as they are — those are how WordPress matches an installed
+	// plugin to an update, and renaming them would strand every site already
+	// receiving updates through the GitHub updater.
 	add_menu_page(
-		__( 'Image Sizes', 'image-size-manager' ),
-		__( 'Image Sizes', 'image-size-manager' ),
+		__( 'Image Manager', 'image-size-manager' ),
+		__( 'Image Manager', 'image-size-manager' ),
 		'manage_options',
 		'image-size-manager',
 		'ism_render_admin_page',

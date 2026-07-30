@@ -1036,3 +1036,11 @@
 .ism-verdict-broken  { background: #fcf0f1; border-color: #b32d2e; }
 .ism-verdict-fine    { background: #f0f7f1; border-color: #1d7e2d; }
 .ism-verdict-unknown { background: #f6f7f7; border-color: #a7aaad; }
+
+.ism-seo-proposal-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 6px 0 2px;
+}
+.ism-seo-chart-toolbar label { white-space: nowrap; }

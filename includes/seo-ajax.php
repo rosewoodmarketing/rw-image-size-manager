@@ -620,6 +620,11 @@ function ism_ajax_seo_apply(): void {
 				update_post_meta( $id, '_wp_attachment_image_alt', $alt );
 			}
 
+			// Approving and writing a row is the act of reviewing it, so the
+			// mark is set here rather than asking for a second click that means
+			// the same thing.
+			update_post_meta( $id, ISM_SEO_REVIEWED_META, time() );
+
 			$wrote[] = $id;
 			$applied++;
 		}
@@ -655,10 +660,8 @@ function ism_ajax_seo_apply(): void {
 		}
 	}
 	ism_seo_cache_touch( $touched, function ( array $row ) {
-		$fresh = ism_seo_row( (int) $row['id'] );
-		// Reviewed state is not re-derived from the write; keep what was there.
-		$fresh['reviewed'] = ! empty( $row['reviewed'] );
-		return $fresh;
+		// Re-derived in full, including the reviewed mark the apply just set.
+		return ism_seo_row( (int) $row['id'] );
 	} );
 
 	wp_send_json_success( [
@@ -767,6 +770,33 @@ function ism_ajax_seo_save_advanced(): void {
 	ism_save_settings( $settings );
 
 	wp_send_json_success( [ 'weights' => $weights, 'extra_prompt' => $settings['ai_extra_prompt'] ] );
+}
+
+/**
+ * AJAX: drop the proposals for specific attachments.
+ *
+ * Rejecting is not reviewing. Discarding a proposal says the suggestion was
+ * wrong, which leaves the image exactly where it was — still needing a
+ * decision. Marking it reviewed is a separate, deliberate act.
+ */
+function ism_ajax_seo_reject(): void {
+	check_ajax_referer( 'ism_seo', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	$ids = array_values( array_filter( array_map( 'intval', (array) ( $_POST['ids'] ?? [] ) ) ) );
+	if ( empty( $ids ) ) {
+		wp_send_json_error( 'No attachment specified.' );
+	}
+
+	$state = ism_seo_get_state();
+	foreach ( $ids as $id ) {
+		unset( $state['results'][ (string) $id ] );
+	}
+	ism_seo_set_state( $state );
+
+	wp_send_json_success( [ 'ids' => $ids, 'remaining' => count( $state['results'] ) ] );
 }
 
 /**

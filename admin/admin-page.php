@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 ?>
 <div class="wrap ism-wrap">
-	<h1><?php esc_html_e( 'RW Image Size Manager', 'image-size-manager' ); ?></h1>
+	<h1><?php esc_html_e( 'Image Manager', 'image-size-manager' ); ?></h1>
 
 	<?php if ( $saved ) : ?>
 		<div class="notice notice-success is-dismissible">
@@ -728,30 +728,32 @@ if ( ! defined( 'ABSPATH' ) ) {
 				</p>
 
 				<div class="ism-seo-chart-toolbar">
-					<label>
-						<?php esc_html_e( 'Show', 'image-size-manager' ); ?>
+<label>
+						<?php esc_html_e( 'Images', 'image-size-manager' ); ?>
 						<select id="ism-seo-filter">
-							<option value="ready"><?php esc_html_e( 'Ready to generate', 'image-size-manager' ); ?></option>
-							<option value="proposals"><?php esc_html_e( 'Proposals — generated, not yet applied', 'image-size-manager' ); ?></option>
-							<option value="noalt"><?php esc_html_e( 'Ready, missing alt text', 'image-size-manager' ); ?></option>
-							<option value="missing"><?php esc_html_e( 'Missing any field', 'image-size-manager' ); ?></option>
-							<option value="missing_title"><?php esc_html_e( 'Missing title', 'image-size-manager' ); ?></option>
-							<option value="missing_desc"><?php esc_html_e( 'Missing description', 'image-size-manager' ); ?></option>
-							<option value="dupes"><?php esc_html_e( 'Duplicates only', 'image-size-manager' ); ?></option>
+							<option value="usable"><?php esc_html_e( 'On the site (excluding decorative)', 'image-size-manager' ); ?></option>
 							<option value="skipped"><?php esc_html_e( 'Decorative / unsupported', 'image-size-manager' ); ?></option>
 							<option value="unused"><?php esc_html_e( 'Not found on any page', 'image-size-manager' ); ?></option>
-							<option value="visible"><?php esc_html_e( 'Probably visible to visitors', 'image-size-manager' ); ?></option>
-							<option value="harmless"><?php esc_html_e( 'Probably harmless leftovers', 'image-size-manager' ); ?></option>
-							<option value="all"><?php esc_html_e( 'Everything', 'image-size-manager' ); ?></option>
+							<option value="all"><?php esc_html_e( 'All images', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<label>
+						<?php esc_html_e( 'Review', 'image-size-manager' ); ?>
+						<select id="ism-seo-review-filter">
+							<option value="unreviewed"><?php esc_html_e( 'Unreviewed', 'image-size-manager' ); ?></option>
+							<option value="reviewed"><?php esc_html_e( 'Reviewed', 'image-size-manager' ); ?></option>
+							<option value="all"><?php esc_html_e( 'All', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<label>
+						<?php esc_html_e( 'Proposals', 'image-size-manager' ); ?>
+						<select id="ism-seo-proposal-filter">
+							<option value="all"><?php esc_html_e( 'All', 'image-size-manager' ); ?></option>
+							<option value="proposals"><?php esc_html_e( 'Current proposals only', 'image-size-manager' ); ?></option>
 						</select>
 					</label>
 					<input type="search" id="ism-seo-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename or page…', 'image-size-manager' ); ?>" />
-					<button type="button" class="button" id="ism-seo-check-all"><?php esc_html_e( 'Tick all shown', 'image-size-manager' ); ?></button>
-					<button type="button" class="button" id="ism-seo-check-none"><?php esc_html_e( 'Untick all', 'image-size-manager' ); ?></button>
-					<label class="ism-seo-show-reviewed">
-						<input type="checkbox" id="ism-seo-show-reviewed" />
-						<?php esc_html_e( 'Show reviewed', 'image-size-manager' ); ?>
-					</label>
+					<button type="button" class="button" id="ism-seo-check-all" data-mode="select"><?php esc_html_e( 'Select all', 'image-size-manager' ); ?></button>
 					<span class="ism-seo-chart-count"></span>
 				</div>
 

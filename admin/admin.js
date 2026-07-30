@@ -1101,6 +1101,12 @@
 				$( '#ism-seo-rescan' ).prop( 'disabled', false );
 				seoPage = 1;
 				seoBuildGroups();
+
+				// A reload with work still pending should open on that work.
+				if ( Object.keys( seoProposals ).length ) {
+					$( '#ism-seo-proposal-filter' ).val( 'proposals' );
+					$( '#ism-seo-review-filter' ).val( 'all' );
+				}
 				seoRenderSummary();
 				seoRenderChart();
 				seoRenderReview();
@@ -1284,25 +1290,27 @@
 
 	// ── Chart ───────────────────────────────────────────────────────────────
 
+	// Three independent axes rather than one dropdown mixing them. Which
+	// population of images you are looking at, whether you have already dealt
+	// with them, and whether they currently carry a proposal are separate
+	// questions, and folding them together is what made the old list confusing.
 	function seoVisibleGroups() {
-		var filter       = $( '#ism-seo-filter' ).val() || 'ready';
-		var term         = ( $( '#ism-seo-search' ).val() || '' ).toLowerCase();
-		var showReviewed = $( '#ism-seo-show-reviewed' ).is( ':checked' );
+		var pop      = $( '#ism-seo-filter' ).val() || 'usable';
+		var review   = $( '#ism-seo-review-filter' ).val() || 'unreviewed';
+		var proposal = $( '#ism-seo-proposal-filter' ).val() || 'all';
+		var term     = ( $( '#ism-seo-search' ).val() || '' ).toLowerCase();
 
 		return seoGroups.filter( function ( g ) {
-			// Reviewed images stay out of the way until asked for. Checking one
-			// off is how you make progress through a 700-image library visible.
-			if ( g.reviewed && ! showReviewed ) { return false; }
+			// "On the site" means describable and actually referenced — the two
+			// conditions that make generation possible at all.
+			if ( pop === 'usable'  && g.group !== 'ready' ) { return false; }
+			if ( pop === 'skipped' && g.group !== 'skipped' ) { return false; }
+			if ( pop === 'unused'  && g.group !== 'unused' ) { return false; }
 
-			if ( filter === 'ready'   && g.group !== 'ready' ) { return false; }
-			if ( filter === 'proposals' && ! seoHasOpenProposal( g ) ) { return false; }
-			if ( filter === 'noalt'   && ( g.group !== 'ready' || g.rep.current.alt_text ) ) { return false; }
-			if ( filter === 'skipped' && g.group !== 'skipped' ) { return false; }
-			if ( filter === 'unused'  && g.group !== 'unused' ) { return false; }
-			if ( filter === 'dupes'   && g.copies < 2 ) { return false; }
-			if ( filter === 'missing'       && ! g.missing.length ) { return false; }
-			if ( filter === 'missing_title' && g.missing.indexOf( 'title' ) === -1 ) { return false; }
-			if ( filter === 'missing_desc'  && g.missing.indexOf( 'description' ) === -1 ) { return false; }
+			if ( review === 'unreviewed' && g.reviewed ) { return false; }
+			if ( review === 'reviewed'   && ! g.reviewed ) { return false; }
+
+			if ( proposal === 'proposals' && ! seoHasOpenProposal( g ) ) { return false; }
 
 			if ( term ) {
 				var hay = g.rep.filename.toLowerCase() + ' '
@@ -1375,6 +1383,12 @@
 			+ ' <span class="ism-seo-ids">' + esc( idList ) + '</span>'
 			+ '</div>'
 			+ '<div class="ism-seo-badges">' + seoBadges( g ) + '</div>'
+			+ ( seoHasOpenProposal( g )
+				? '<div class="ism-seo-proposal-actions">'
+					+ '<button type="button" class="button button-small ism-seo-reject" data-key="' + esc( g.key ) + '">Reject proposal</button>'
+					+ '<span class="description">Drops the suggestion. Does not mark the image reviewed.</span>'
+					+ '</div>'
+				: '' )
 			+ '<div class="ism-seo-places">' + seoPlacesHtml( g ) + '</div>'
 			+ '</div>'
 			+ '<div class="ism-seo-row-actions">'
@@ -1418,8 +1432,9 @@
 		var checked = 0;
 		seoGroups.forEach( function ( g ) { if ( seoChecked[ g.key ] ) { checked++; } } );
 
-		$( '.ism-seo-chart-count' ).text( vis.length + ' shown · ' + checked + ' ticked' );
-		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' ticked)' : '(none ticked yet)' );
+		$( '.ism-seo-chart-count' ).text( vis.length + ' shown · ' + checked + ' selected' );
+		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' selected)' : '(none selected yet)' );
+		seoSyncSelectAllButton();
 		seoRenderEstimate();
 
 		if ( ! vis.length ) {
@@ -1494,7 +1509,7 @@
 		} );
 	} );
 
-	$( document ).on( 'change', '#ism-seo-filter, #ism-seo-show-reviewed', function () {
+	$( document ).on( 'change', '#ism-seo-filter, #ism-seo-review-filter, #ism-seo-proposal-filter', function () {
 		seoPage = 1;
 		seoRenderChart();
 	} );
@@ -1507,18 +1522,57 @@
 		var k = String( $( this ).data( 'key' ) );
 		if ( $( this ).is( ':checked' ) ) { seoChecked[ k ] = true; } else { delete seoChecked[ k ]; }
 		var checked = Object.keys( seoChecked ).length;
-		$( '.ism-seo-chart-count' ).text( seoVisibleGroups().length + ' shown · ' + checked + ' ticked' );
-		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' ticked)' : '(none ticked yet)' );
+		$( '.ism-seo-chart-count' ).text( seoVisibleGroups().length + ' shown · ' + checked + ' selected' );
+		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' selected)' : '(none selected yet)' );
+		seoSyncSelectAllButton();
 		seoRenderEstimate();
 	} );
 
+	// One button that reflects what it will do next, rather than two that both
+	// stay clickable when only one of them is meaningful.
 	$( document ).on( 'click', '#ism-seo-check-all', function () {
-		seoVisibleGroups().forEach( function ( g ) { seoChecked[ g.key ] = true; } );
+		var $btn = $( this );
+
+		if ( $btn.data( 'mode' ) === 'select' ) {
+			seoVisibleGroups().forEach( function ( g ) { seoChecked[ g.key ] = true; } );
+		} else {
+			seoVisibleGroups().forEach( function ( g ) { delete seoChecked[ g.key ]; } );
+		}
+
 		seoRenderChart();
 	} );
-	$( document ).on( 'click', '#ism-seo-check-none', function () {
-		seoChecked = {};
-		seoRenderChart();
+
+	function seoSyncSelectAllButton() {
+		var vis = seoVisibleGroups();
+		var all = vis.length > 0 && vis.every( function ( g ) { return seoChecked[ g.key ]; } );
+
+		$( '#ism-seo-check-all' )
+			.data( 'mode', all ? 'unselect' : 'select' )
+			.text( all ? 'Unselect all' : 'Select all' );
+	}
+
+	// Rejecting is not reviewing: the suggestion was wrong, so the image drops
+	// out of the proposals view and goes back to needing a decision. Marking it
+	// reviewed stays a separate, deliberate act.
+	$( document ).on( 'click', '.ism-seo-reject', function () {
+		var g = seoGroupByKey( String( $( this ).data( 'key' ) ) );
+		if ( ! g ) { return; }
+
+		var $btn = $( this ).prop( 'disabled', true ).text( 'Rejecting…' );
+
+		seoPost( 'ism_seo_reject', { ids: g.ids }, function ( res ) {
+			if ( ! res.success ) {
+				$btn.prop( 'disabled', false ).text( 'Reject proposal' );
+				return;
+			}
+			g.ids.forEach( function ( id ) { delete seoProposals[ String( id ) ]; } );
+			delete seoEdits[ g.key ];
+			delete seoChecked[ g.key ];
+			seoRenderChart();
+			seoRenderReview();
+		}, function () {
+			$btn.prop( 'disabled', false ).text( 'Reject proposal' );
+		} );
 	} );
 
 	// Edits are held per group so a re-render never loses typing.
@@ -1623,6 +1677,15 @@
 				+ ' · ' + stats.ok + ' generated, ' + stats.failed + ' failed'
 				+ ( stats.tokens ? ' · ' + stats.tokens.toLocaleString() + ' tokens' : '' )
 			);
+			// Finishing a run means the proposals are the thing to look at, so
+			// the view switches to them instead of leaving them buried behind
+			// whatever filter was set before.
+			if ( ! seoAborted && stats.ok > 0 ) {
+				$( '#ism-seo-proposal-filter' ).val( 'proposals' );
+				$( '#ism-seo-review-filter' ).val( 'all' );
+				seoPage = 1;
+			}
+
 			seoRenderChart();
 			seoRenderReview();
 			return;
@@ -1756,6 +1819,8 @@
 			seoGroups.forEach( function ( g ) {
 				if ( ! seoChecked[ g.key ] ) { return; }
 				var v = seoGroupValues( g );
+				g.reviewed = true;
+				g.rows.forEach( function ( row ) { row.reviewed = true; } );
 				g.rows.forEach( function ( row ) {
 					if ( v.title ) { row.current.title = v.title; }
 					if ( v.alt_text ) { row.current.alt_text = v.alt_text; }
