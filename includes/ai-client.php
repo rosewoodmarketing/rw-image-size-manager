@@ -395,6 +395,12 @@ Return three fields:
   library, covering what the image shows and how it relates to the page it
   appears on.
 
+When the image is a logo, brand mark, or icon, alt text should name the thing it
+stands for rather than describe how it looks. "Buckeye Metal Sales" tells a
+screen-reader user what they need; an inventory of the colours, shapes and
+layout of the mark does not. Judge for yourself which images this applies to.
+Everything else gets the descriptive treatment above.
+
 If the context includes a filename hint, use it as a hint only. Write a better
 and more specific title than the filename suggests — never copy it back. If the
 context says the image was not found on any page, describe only what you can

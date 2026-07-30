@@ -990,4 +990,490 @@
 		quality:    VISION_QUALITY
 	};
 
+	// ── Image SEO ───────────────────────────────────────────────────────────
+	//
+	// The browser drives generation one image at a time. That is required, not
+	// stylistic: an image this host cannot decode is converted here via canvas
+	// and posted back in the same request, so the client has to be in the loop.
+	// It also paces requests and keeps the progress bar honest.
+	//
+	// Nothing is written to the media library from this code except through the
+	// explicit Apply button, over checked rows only.
+
+	var seoRows      = [];   // every scanned row
+	var seoProposals = {};   // attachment id -> { title, alt_text, description, error }
+	var seoAborted   = false;
+
+	function seoPost( action, data, done, fail ) {
+		data = $.extend( { action: action, nonce: ismData.seoNonce }, data || {} );
+		return $.post( ismData.ajaxUrl, data, done ).fail( fail || function () {} );
+	}
+
+	// Transport and server-side hiccups are worth another attempt. A refusal, a
+	// missing key, or a skipped attachment will fail identically forever.
+	function seoIsRetryable( code ) {
+		if ( ! code ) {
+			return true; // network-level failure with no code at all
+		}
+		if ( code === 'ism_ai_transport' ) {
+			return true;
+		}
+		return /^ism_ai_http_(429|5\d\d)$/.test( code );
+	}
+
+	// ── Usage index ─────────────────────────────────────────────────────────
+
+	function seoIndexRun( offset, total ) {
+		$.post( ismData.ajaxUrl, {
+			action: 'ism_usage_index_batch',
+			nonce:  ismData.usageIndexNonce,
+			offset: offset
+		}, function ( res ) {
+			if ( ! res.success ) {
+				$( '#ism-usage-index-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
+				return;
+			}
+			var d   = res.data;
+			var pct = d.total ? Math.round( ( d.offset / d.total ) * 100 ) : 100;
+			$( '#ism-usage-index-bar' ).css( 'width', pct + '%' );
+			$( '#ism-usage-index-status' ).text( d.offset + ' / ' + d.total + ' posts scanned, ' + d.found + ' images found' );
+
+			if ( d.done ) {
+				$( '#ism-usage-index-status' ).text( 'Done. ' + d.total + ' posts scanned, ' + d.found + ' images indexed. Now scan the library.' );
+				$( '#ism-usage-index-start' ).prop( 'disabled', false );
+				return;
+			}
+			setTimeout( function () { seoIndexRun( d.offset, d.total ); }, 100 );
+		} ).fail( function () {
+			$( '#ism-usage-index-status' ).text( 'Request failed. Reload and try again.' );
+			$( '#ism-usage-index-start' ).prop( 'disabled', false );
+		} );
+	}
+
+	$( document ).on( 'click', '#ism-usage-index-start', function () {
+		$( this ).prop( 'disabled', true );
+		$( '#ism-usage-index-progress' ).show();
+		$( '#ism-usage-index-bar' ).css( 'width', '0%' );
+		$( '#ism-usage-index-status' ).text( 'Starting…' );
+
+		$.post( ismData.ajaxUrl, {
+			action:        'ism_usage_index_init',
+			nonce:         ismData.usageIndexNonce,
+			force_restart: 1
+		}, function ( res ) {
+			if ( ! res.success ) {
+				$( '#ism-usage-index-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
+				$( '#ism-usage-index-start' ).prop( 'disabled', false );
+				return;
+			}
+			seoIndexRun( res.data.offset, res.data.total );
+		} );
+	} );
+
+	// ── Scan ────────────────────────────────────────────────────────────────
+
+	function seoScanRun( offset, total ) {
+		seoPost( 'ism_seo_scan_batch', { offset: offset }, function ( res ) {
+			if ( ! res.success ) {
+				$( '#ism-seo-scan-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
+				$( '#ism-seo-scan-start' ).prop( 'disabled', false );
+				return;
+			}
+			var d = res.data;
+			seoRows = seoRows.concat( d.rows );
+
+			var pct = d.total ? Math.round( ( d.offset / d.total ) * 100 ) : 100;
+			$( '#ism-seo-scan-bar' ).css( 'width', pct + '%' );
+			$( '#ism-seo-scan-status' ).text( d.offset + ' / ' + d.total + ' images classified' );
+
+			if ( d.done ) {
+				$( '#ism-seo-scan-status' ).text( 'Scan complete — ' + d.total + ' images.' );
+				$( '#ism-seo-scan-start' ).prop( 'disabled', false );
+				seoRenderSummary();
+				seoRenderGroups();
+				seoRenderReview();
+				return;
+			}
+			setTimeout( function () { seoScanRun( d.offset, d.total ); }, 60 );
+		}, function () {
+			$( '#ism-seo-scan-status' ).text( 'Request failed. Reload and try again.' );
+			$( '#ism-seo-scan-start' ).prop( 'disabled', false );
+		} );
+	}
+
+	$( document ).on( 'click', '#ism-seo-scan-start', function () {
+		$( this ).prop( 'disabled', true );
+		seoRows = [];
+		$( '#ism-seo-scan-progress' ).show();
+		$( '#ism-seo-scan-bar' ).css( 'width', '0%' );
+		$( '#ism-seo-scan-status' ).text( 'Starting…' );
+
+		seoPost( 'ism_seo_scan_init', {}, function ( res ) {
+			if ( ! res.success ) {
+				$( '#ism-seo-scan-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
+				$( '#ism-seo-scan-start' ).prop( 'disabled', false );
+				return;
+			}
+			// Proposals generated earlier survive a reload, so a scan restores
+			// them into the review table rather than discarding paid-for work.
+			seoProposals = res.data.results || {};
+
+			if ( ! res.data.index_built ) {
+				$( '#ism-seo-scan-status' ).text( 'The usage index has not been built. Build it first or every image will look unused.' );
+			}
+			seoScanRun( 0, res.data.total );
+		} );
+	} );
+
+	function seoCount( group ) {
+		var n = 0;
+		seoRows.forEach( function ( r ) { if ( r.group === group ) { n++; } } );
+		return n;
+	}
+
+	function seoPending() {
+		return seoRows.filter( function ( r ) {
+			return r.group === 'ready' && ! seoProposals[ r.id ];
+		} );
+	}
+
+	function seoRenderSummary() {
+		var ready   = seoCount( 'ready' );
+		var skipped = seoCount( 'skipped' );
+		var unused  = seoCount( 'unused' );
+		var client  = seoRows.filter( function ( r ) { return r.needs_client; } ).length;
+
+		var html = '<ul class="ism-seo-stats">'
+			+ '<li><strong>' + ready + '</strong> ready to generate</li>'
+			+ '<li><strong>' + skipped + '</strong> decorative or unsupported</li>'
+			+ '<li><strong>' + unused + '</strong> found on no page</li>'
+			+ '<li><strong>' + seoRows.length + '</strong> images total</li>'
+			+ '</ul>';
+
+		if ( client > 0 ) {
+			html += '<p class="description">' + client + ' image(s) are in a format this server cannot read; the browser will convert them as it goes.</p>';
+		}
+
+		$( '#ism-seo-summary' ).html( html ).show();
+		$( '#ism-seo-generate-card' ).toggle( ready > 0 );
+	}
+
+	// ── Groups that are listed but never generated for ──────────────────────
+
+	function seoSimpleRow( r, note ) {
+		var thumb = r.thumb
+			? '<img src="' + esc( r.thumb ) + '" alt="" width="40" height="40" loading="lazy" />'
+			: '<span class="ism-seo-nothumb"></span>';
+		var name = r.edit_url
+			? '<a href="' + esc( r.edit_url ) + '" target="_blank">' + esc( r.filename ) + '</a>'
+			: esc( r.filename );
+
+		return '<tr>'
+			+ '<td class="ism-seo-thumb-cell">' + thumb + '</td>'
+			+ '<td>' + name + '<br><span class="description">' + esc( r.current.title || '(no title)' ) + '</span></td>'
+			+ '<td>' + esc( r.current.alt_text || '—' ) + '</td>'
+			+ '<td>' + esc( note ) + '</td>'
+			+ '</tr>';
+	}
+
+	function seoRenderGroups() {
+		var skipped = seoRows.filter( function ( r ) { return r.group === 'skipped'; } );
+		var unused  = seoRows.filter( function ( r ) { return r.group === 'unused'; } );
+
+		function table( rows, noteFor ) {
+			var html = '<table class="widefat ism-seo-table"><thead><tr>'
+				+ '<th></th><th>File</th><th>Current alt text</th><th>Why</th>'
+				+ '</tr></thead><tbody>';
+			rows.forEach( function ( r ) { html += seoSimpleRow( r, noteFor( r ) ); } );
+			return html + '</tbody></table>';
+		}
+
+		if ( skipped.length ) {
+			$( '#ism-seo-skipped-list' ).html( table( skipped, function ( r ) {
+				if ( r.skip_reason === 'svg' ) { return 'SVG — decorative'; }
+				if ( r.skip_reason === 'icon_size' ) { return '64px or smaller — icon'; }
+				return 'Unsupported format (' + r.mime + ')';
+			} ) );
+			$( '#ism-seo-skipped-card' ).show();
+		} else {
+			$( '#ism-seo-skipped-card' ).hide();
+		}
+
+		if ( unused.length ) {
+			$( '#ism-seo-unused-list' ).html( table( unused, function () {
+				return 'No page references it';
+			} ) );
+			$( '#ism-seo-unused-card' ).show();
+		} else {
+			$( '#ism-seo-unused-card' ).hide();
+		}
+	}
+
+	// ── Review table ────────────────────────────────────────────────────────
+
+	function seoField( id, key, label, value, current ) {
+		var input = key === 'description'
+			? '<textarea rows="3" class="large-text ism-seo-input" data-id="' + id + '" data-field="' + key + '">' + esc( value ) + '</textarea>'
+			: '<input type="text" class="large-text ism-seo-input" data-id="' + id + '" data-field="' + key + '" value="' + esc( value ) + '" />';
+
+		var was = current
+			? '<span class="ism-seo-was">was: ' + esc( current ) + '</span>'
+			: '<span class="ism-seo-was ism-seo-was-empty">was empty</span>';
+
+		return '<div class="ism-seo-field"><label>' + esc( label ) + '</label>' + input + was + '</div>';
+	}
+
+	function seoRenderReview() {
+		var ids = Object.keys( seoProposals );
+		if ( ! ids.length ) {
+			$( '#ism-seo-review-card' ).hide();
+			$( '#ism-seo-review-list' ).empty();
+			return;
+		}
+
+		var byId = {};
+		seoRows.forEach( function ( r ) { byId[ r.id ] = r; } );
+
+		var html = '';
+		ids.forEach( function ( id ) {
+			var p = seoProposals[ id ];
+			var r = byId[ id ] || { id: id, filename: '#' + id, thumb: '', edit_url: '', used_on: [], current: { title: '', alt_text: '', description: '' } };
+
+			if ( p.error ) {
+				html += '<div class="ism-seo-review-row ism-seo-row-error">'
+					+ '<div class="ism-seo-review-head">'
+					+ ( r.thumb ? '<img src="' + esc( r.thumb ) + '" alt="" width="48" height="48" loading="lazy" />' : '' )
+					+ '<div><strong>' + esc( r.filename ) + '</strong>'
+					+ '<div class="ism-seo-error">' + esc( p.error ) + '</div></div></div></div>';
+				return;
+			}
+
+			var usedOn = r.used_on && r.used_on.length
+				? 'Appears on: ' + r.used_on.map( function ( t ) { return esc( t ); } ).join( ', ' )
+					+ ( r.used_count > r.used_on.length ? ' +' + ( r.used_count - r.used_on.length ) + ' more' : '' )
+				: '';
+
+			html += '<div class="ism-seo-review-row" data-id="' + id + '">'
+				+ '<div class="ism-seo-review-head">'
+				+ '<label class="ism-seo-check"><input type="checkbox" class="ism-seo-row-check" data-id="' + id + '" checked /></label>'
+				+ ( r.thumb ? '<img src="' + esc( r.thumb ) + '" alt="" width="48" height="48" loading="lazy" />' : '' )
+				+ '<div class="ism-seo-review-meta">'
+				+ ( r.edit_url ? '<a href="' + esc( r.edit_url ) + '" target="_blank"><strong>' + esc( r.filename ) + '</strong></a>' : '<strong>' + esc( r.filename ) + '</strong>' )
+				+ ( usedOn ? '<div class="description">' + usedOn + '</div>' : '' )
+				+ '</div></div>'
+				+ '<div class="ism-seo-fields">'
+				+ seoField( id, 'title', 'Title', p.title, r.current.title )
+				+ seoField( id, 'alt_text', 'Alt text', p.alt_text, r.current.alt_text )
+				+ seoField( id, 'description', 'Description', p.description, r.current.description )
+				+ '</div></div>';
+		} );
+
+		$( '#ism-seo-review-list' ).html( html );
+		$( '#ism-seo-review-card' ).show();
+	}
+
+	// Keep edits in the in-memory proposal so a re-render does not lose them.
+	$( document ).on( 'input change', '.ism-seo-input', function () {
+		var $f = $( this );
+		var id = String( $f.data( 'id' ) );
+		if ( seoProposals[ id ] ) {
+			seoProposals[ id ][ $f.data( 'field' ) ] = $f.val();
+		}
+	} );
+
+	$( document ).on( 'click', '#ism-seo-select-all', function () {
+		$( '.ism-seo-row-check' ).prop( 'checked', true );
+	} );
+	$( document ).on( 'click', '#ism-seo-select-none', function () {
+		$( '.ism-seo-row-check' ).prop( 'checked', false );
+	} );
+
+	// ── Generate ────────────────────────────────────────────────────────────
+
+	function seoGenerateOne( row, retries, onDone ) {
+		retries = retries || 0;
+
+		function send( dataUrl ) {
+			seoPost( 'ism_seo_generate', {
+				attachment_id:  row.id,
+				image_data_url: dataUrl || ''
+			}, function ( res ) {
+				if ( res.success ) {
+					seoProposals[ String( row.id ) ] = res.data.proposal;
+					onDone( null, res.data );
+					return;
+				}
+				var d = res.data || {};
+				if ( seoIsRetryable( d.code ) && retries < 3 ) {
+					var delay = Math.pow( 2, retries + 1 ) * 1000;
+					setTimeout( function () { seoGenerateOne( row, retries + 1, onDone ); }, delay );
+					return;
+				}
+				seoProposals[ String( row.id ) ] = {
+					title: '', alt_text: '', description: '',
+					error: ( d.message || 'Generation failed' )
+				};
+				onDone( d.message || 'failed', null );
+			}, function () {
+				// No structured response at all — always worth a retry.
+				if ( retries < 3 ) {
+					var delay = Math.pow( 2, retries + 1 ) * 1000;
+					setTimeout( function () { seoGenerateOne( row, retries + 1, onDone ); }, delay );
+					return;
+				}
+				seoProposals[ String( row.id ) ] = {
+					title: '', alt_text: '', description: '',
+					error: 'Connection lost'
+				};
+				onDone( 'connection lost', null );
+			} );
+		}
+
+		if ( row.needs_client && row.client_url ) {
+			window.ismVision.convert( row.client_url, function ( dataUrl, err ) {
+				if ( err ) {
+					seoProposals[ String( row.id ) ] = {
+						title: '', alt_text: '', description: '', error: err
+					};
+					onDone( err, null );
+					return;
+				}
+				send( dataUrl );
+			} );
+			return;
+		}
+
+		send( '' );
+	}
+
+	function seoGenerateLoop( queue, index, stats ) {
+		if ( seoAborted || index >= queue.length ) {
+			$( '#ism-seo-generate-start' ).prop( 'disabled', false );
+			$( '#ism-seo-generate-cancel' ).hide();
+			$( '#ism-seo-generate-status' ).text(
+				( seoAborted ? 'Stopped at ' : 'Done — ' ) + index + ' / ' + queue.length
+				+ ' · ' + stats.ok + ' generated, ' + stats.failed + ' failed'
+				+ ( stats.tokens ? ' · ' + stats.tokens.toLocaleString() + ' tokens' : '' )
+			);
+			seoRenderReview();
+			return;
+		}
+
+		var row = queue[ index ];
+		var pct = Math.round( ( index / queue.length ) * 100 );
+		$( '#ism-seo-generate-bar' ).css( 'width', pct + '%' );
+		$( '#ism-seo-generate-status' ).text(
+			( index + 1 ) + ' / ' + queue.length + ' — ' + row.filename
+			+ ( row.needs_client ? ' (converting in browser)' : '' )
+		);
+
+		seoGenerateOne( row, 0, function ( err, data ) {
+			var $log = $( '#ism-seo-generate-log' ).show();
+			if ( err ) {
+				stats.failed++;
+				$log.append( $( '<li>' ).addClass( 'ism-log-error' ).text( row.filename + ' — ' + err ) );
+			} else {
+				stats.ok++;
+				if ( data && data.run_usage ) {
+					stats.tokens = data.run_usage.total_tokens || stats.tokens;
+				}
+				$log.append( $( '<li>' ).text( row.filename + ' ✓' ) );
+			}
+			$log.scrollTop( $log[ 0 ].scrollHeight );
+
+			// Re-render periodically so results are readable during a long run
+			// rather than only at the end.
+			if ( ( index + 1 ) % 5 === 0 ) {
+				seoRenderReview();
+			}
+
+			setTimeout( function () { seoGenerateLoop( queue, index + 1, stats ); }, 250 );
+		} );
+	}
+
+	$( document ).on( 'click', '#ism-seo-generate-start', function () {
+		var limit = Math.max( 1, parseInt( $( '#ism-seo-limit' ).val(), 10 ) || 20 );
+		var queue = seoPending().slice( 0, limit );
+
+		if ( ! queue.length ) {
+			$( '#ism-seo-generate-status' ).text( 'Nothing left to generate — every ready image already has a proposal.' );
+			$( '#ism-seo-generate-progress' ).show();
+			return;
+		}
+
+		seoAborted = false;
+		$( this ).prop( 'disabled', true );
+		$( '#ism-seo-generate-cancel' ).show();
+		$( '#ism-seo-generate-progress' ).show();
+		$( '#ism-seo-generate-log' ).empty();
+		$( '#ism-seo-generate-bar' ).css( 'width', '0%' );
+
+		seoGenerateLoop( queue, 0, { ok: 0, failed: 0, tokens: 0 } );
+	} );
+
+	$( document ).on( 'click', '#ism-seo-generate-cancel', function () {
+		seoAborted = true;
+		$( this ).hide();
+		$( '#ism-seo-generate-status' ).text( 'Stopping after the current image…' );
+	} );
+
+	// ── Apply ───────────────────────────────────────────────────────────────
+
+	$( document ).on( 'click', '#ism-seo-apply', function () {
+		var rows = [];
+		$( '.ism-seo-row-check:checked' ).each( function () {
+			var id = String( $( this ).data( 'id' ) );
+			var p  = seoProposals[ id ];
+			if ( ! p || p.error ) {
+				return;
+			}
+			rows.push( {
+				id:          id,
+				title:       p.title,
+				alt_text:    p.alt_text,
+				description: p.description
+			} );
+		} );
+
+		if ( ! rows.length ) {
+			$( '.ism-seo-apply-status' ).text( 'No rows selected.' );
+			return;
+		}
+
+		if ( ! window.confirm( 'Write ' + rows.length + ' image(s) to the media library? Existing values for the fields you filled in will be overwritten.' ) ) {
+			return;
+		}
+
+		var $btn = $( this ).prop( 'disabled', true );
+		$( '.ism-seo-apply-status' ).text( 'Applying…' );
+
+		seoPost( 'ism_seo_apply', { rows: rows }, function ( res ) {
+			$btn.prop( 'disabled', false );
+			if ( ! res.success ) {
+				$( '.ism-seo-apply-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
+				return;
+			}
+			rows.forEach( function ( r ) { delete seoProposals[ r.id ]; } );
+			$( '.ism-seo-apply-status' ).text(
+				'Applied ' + res.data.applied + ' image(s)'
+				+ ( res.data.skipped ? ', skipped ' + res.data.skipped : '' ) + '.'
+			);
+			seoRenderReview();
+		}, function () {
+			$btn.prop( 'disabled', false );
+			$( '.ism-seo-apply-status' ).text( 'Request failed — nothing was written.' );
+		} );
+	} );
+
+	$( document ).on( 'click', '#ism-seo-discard', function () {
+		if ( ! window.confirm( 'Discard every unapplied proposal? The tokens already spent on them are not refundable.' ) ) {
+			return;
+		}
+		seoPost( 'ism_seo_reset', {}, function () {
+			seoProposals = {};
+			seoRenderReview();
+			$( '.ism-seo-apply-status' ).text( 'Proposals discarded.' );
+		} );
+	} );
+
 } )( jQuery );

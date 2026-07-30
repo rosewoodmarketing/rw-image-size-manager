@@ -41,6 +41,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<button type="button" class="ism-tab" data-target="ism-panel-media-log">
 				<?php esc_html_e( 'Media Log', 'image-size-manager' ); ?>
 			</button>
+			<button type="button" class="ism-tab" data-target="ism-panel-seo">
+				<?php esc_html_e( 'Image SEO', 'image-size-manager' ); ?>
+			</button>
 			<button type="button" class="ism-tab ism-tab-advanced" data-target="ism-panel-advanced">
 				<?php esc_html_e( 'Advanced', 'image-size-manager' ); ?>
 			</button>
@@ -475,6 +478,189 @@ if ( ! defined( 'ABSPATH' ) ) {
 				</div>
 			</div>
 		</div><!-- /ism-panel-media-log -->
+
+		<!-- ═══════════════════════════════════════════════════════════════════
+		     PANEL – IMAGE SEO
+		     ══════════════════════════════════════════════════════════════════ -->
+		<?php
+		$ism_has_key      = ism_ai_has_key();
+		$ism_index_status = ism_usage_index_status();
+		$ism_index_built  = (bool) $ism_index_status['built_at'];
+		?>
+		<div id="ism-panel-seo" class="ism-panel" hidden>
+
+			<div class="ism-card">
+				<h2><?php esc_html_e( 'Image SEO', 'image-size-manager' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Audit and populate image titles, alt text and descriptions, using the pages each image actually appears on as context. Everything except generation works without an API key.', 'image-size-manager' ); ?>
+				</p>
+			</div>
+
+			<!-- API key ─────────────────────────────────────────────────── -->
+			<div class="ism-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Anthropic API Key', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Required only for generation. Stored in its own option and never sent to the browser. Leave blank to keep the existing key.', 'image-size-manager' ); ?>
+				</p>
+				<p>
+					<input type="password" name="ism_api_key" class="regular-text" autocomplete="off"
+						placeholder="<?php echo esc_attr( $ism_has_key ? __( 'A key is saved — leave blank to keep it', 'image-size-manager' ) : 'sk-ant-…' ); ?>" />
+					<span class="ism-key-state">
+						<?php if ( $ism_has_key ) : ?>
+							<span style="color:#1d7e2d;font-weight:500"><?php esc_html_e( '✓ Key saved', 'image-size-manager' ); ?></span>
+						<?php else : ?>
+							<span style="color:#996800;font-weight:500"><?php esc_html_e( 'No key — generation disabled', 'image-size-manager' ); ?></span>
+						<?php endif; ?>
+					</span>
+				</p>
+				<?php if ( $ism_has_key ) : ?>
+				<p>
+					<label>
+						<input type="checkbox" name="ism_api_key_clear" value="1" />
+						<?php esc_html_e( 'Remove the stored key', 'image-size-manager' ); ?>
+					</label>
+				</p>
+				<?php endif; ?>
+				<p class="description">
+					<?php
+					printf(
+						/* translators: %s: model identifier */
+						esc_html__( 'Generation uses %s.', 'image-size-manager' ),
+						'<code>' . esc_html( ISM_AI_MODEL ) . '</code>'
+					);
+					?>
+				</p>
+			</div>
+
+			<!-- Usage index ─────────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Step 1 — Build the usage index', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Maps every image to the pages, templates and custom fields that reference it. Generation uses that page text as context, so this must run first. No API key needed.', 'image-size-manager' ); ?>
+				</p>
+				<p class="description ism-index-state">
+					<?php if ( $ism_index_built ) : ?>
+						<span style="color:#1d7e2d;font-weight:500">
+						<?php
+						printf(
+							/* translators: 1: post count, 2: attachment count, 3: human-readable time difference */
+							esc_html__( '✓ Indexed %1$d posts, %2$d images — built %3$s ago', 'image-size-manager' ),
+							(int) $ism_index_status['posts_indexed'],
+							(int) $ism_index_status['attachments_found'],
+							esc_html( human_time_diff( (int) $ism_index_status['built_at'] ) )
+						);
+						?>
+						</span>
+					<?php else : ?>
+						<span style="color:#996800;font-weight:500"><?php esc_html_e( 'Not built yet.', 'image-size-manager' ); ?></span>
+					<?php endif; ?>
+				</p>
+				<div class="ism-regen-controls">
+					<button type="button" class="button" id="ism-usage-index-start">
+						<?php echo $ism_index_built
+							? esc_html__( 'Rebuild index', 'image-size-manager' )
+							: esc_html__( 'Build index', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-usage-index-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-usage-index-bar"></div></div>
+					<p class="ism-progress-status" id="ism-usage-index-status"></p>
+				</div>
+			</div>
+
+			<!-- Scan ────────────────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Step 2 — Scan the library', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Sorts every image into what can be generated for, what should be reviewed by hand, and what appears on no page. Read-only; no API key needed.', 'image-size-manager' ); ?>
+				</p>
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-seo-scan-start">
+						<?php esc_html_e( 'Scan library', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-seo-scan-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-seo-scan-bar"></div></div>
+					<p class="ism-progress-status" id="ism-seo-scan-status"></p>
+				</div>
+				<div id="ism-seo-summary" class="ism-seo-summary" style="display:none"></div>
+			</div>
+
+			<!-- Generate ────────────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" id="ism-seo-generate-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Step 3 — Generate proposals', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Runs only over the generatable group. Nothing is written to the media library — every result lands in the review table below for you to edit and approve.', 'image-size-manager' ); ?>
+				</p>
+
+				<?php if ( ! $ism_has_key ) : ?>
+					<p class="description" style="color:#996800;font-weight:500">
+						<?php esc_html_e( 'Add an API key above and save to enable generation.', 'image-size-manager' ); ?>
+					</p>
+				<?php endif; ?>
+
+				<p>
+					<label>
+						<?php esc_html_e( 'Generate for', 'image-size-manager' ); ?>
+						<input type="number" id="ism-seo-limit" class="small-text" value="20" min="1" max="2000" />
+						<?php esc_html_e( 'images without a proposal yet', 'image-size-manager' ); ?>
+					</label>
+					<span class="description" style="display:block;margin-top:4px">
+						<?php esc_html_e( 'Start small on a new site and read the output before scaling up.', 'image-size-manager' ); ?>
+					</span>
+				</p>
+
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-seo-generate-start" <?php disabled( ! $ism_has_key ); ?>>
+						<?php esc_html_e( 'Generate', 'image-size-manager' ); ?>
+					</button>
+					<button type="button" class="button" id="ism-seo-generate-cancel" style="display:none">
+						<?php esc_html_e( 'Stop', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-seo-generate-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-seo-generate-bar"></div></div>
+					<p class="ism-progress-status" id="ism-seo-generate-status"></p>
+					<ul class="ism-regen-log" id="ism-seo-generate-log" style="display:none"></ul>
+				</div>
+			</div>
+
+			<!-- Review ──────────────────────────────────────────────────── -->
+			<div class="ism-card" id="ism-seo-review-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Step 4 — Review and apply', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Every field is editable. Nothing is written until you press Apply, and only checked rows are written. An empty field is left unchanged rather than cleared.', 'image-size-manager' ); ?>
+				</p>
+
+				<div class="ism-seo-review-toolbar">
+					<button type="button" class="button" id="ism-seo-select-all"><?php esc_html_e( 'Select all', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-select-none"><?php esc_html_e( 'Select none', 'image-size-manager' ); ?></button>
+					<button type="button" class="button button-primary" id="ism-seo-apply"><?php esc_html_e( 'Apply selected', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-discard"><?php esc_html_e( 'Discard proposals', 'image-size-manager' ); ?></button>
+					<span class="ism-seo-apply-status"></span>
+				</div>
+
+				<div id="ism-seo-review-list"></div>
+			</div>
+
+			<!-- Listed but never generated ──────────────────────────────── -->
+			<div class="ism-card" id="ism-seo-skipped-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Decorative and unsupported media', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'SVGs, icons and formats that cannot be described. Listed so they can be renamed or merged by hand — a decorative mark given prose alt text is a bug, not a fix. Generation is disabled for these.', 'image-size-manager' ); ?>
+				</p>
+				<div id="ism-seo-skipped-list"></div>
+			</div>
+
+			<div class="ism-card" id="ism-seo-unused-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Not found on any page', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'The usage index found no page, template or custom field referencing these. Without page context the output would be guesswork, so generation is disabled. Worth checking whether they are genuinely unused before spending anything on them.', 'image-size-manager' ); ?>
+				</p>
+				<div id="ism-seo-unused-list"></div>
+			</div>
+
+		</div><!-- /ism-panel-seo -->
 
 		<!-- ═══════════════════════════════════════════════════════════════════
 		     PANEL 5 – ADVANCED (BULK TOOLS)

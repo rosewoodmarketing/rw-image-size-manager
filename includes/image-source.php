@@ -143,19 +143,32 @@ function ism_vision_source( int $attachment_id ) {
  * Whether this attachment will need the browser to convert it.
  *
  * Lets the admin screen mark rows before a run starts instead of discovering it
- * mid-batch. Answers from cached capability only; it never decodes.
+ * mid-batch. Answers from cached capability and what is on disk; it never
+ * decodes anything.
+ *
+ * This has to resolve the file the way ism_vision_source() will, rather than
+ * testing the attachment's own mime. An AVIF attachment with a readable PNG
+ * twin is served from that twin and never touches the browser — answering from
+ * the recorded mime alone would push most of an AVIF library through a canvas
+ * round trip it does not need, and re-encode a pristine PNG as JPEG to do it.
  *
  * @param int $attachment_id
  * @return bool
  */
 function ism_vision_needs_client_decode( int $attachment_id ): bool {
-	$mime = (string) get_post_mime_type( $attachment_id );
+	$file = ism_vision_pick_file( $attachment_id );
 
-	if ( in_array( $mime, ISM_VISION_MIME_OK, true ) ) {
+	// A missing file is a different problem, and one the browser cannot solve
+	// either. Let ism_vision_source() report it properly.
+	if ( is_wp_error( $file ) ) {
 		return false;
 	}
 
-	return ism_vision_cap( $mime ) === false;
+	if ( in_array( $file['mime'], ISM_VISION_MIME_OK, true ) ) {
+		return false;
+	}
+
+	return ism_vision_cap( $file['mime'] ) === false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

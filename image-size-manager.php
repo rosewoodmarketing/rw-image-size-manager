@@ -31,6 +31,7 @@ require_once ISM_PLUGIN_DIR . 'includes/usage-index.php';
 require_once ISM_PLUGIN_DIR . 'includes/context-builder.php';
 require_once ISM_PLUGIN_DIR . 'includes/image-source.php';
 require_once ISM_PLUGIN_DIR . 'includes/ai-client.php';
+require_once ISM_PLUGIN_DIR . 'includes/seo-ajax.php';
 
 if ( is_admin() ) {
 	new ISM_GitHub_Updater( __FILE__, ISM_GITHUB_USER, ISM_GITHUB_REPO );
@@ -87,6 +88,17 @@ add_action( 'wp_ajax_ism_bulk_resize_init',   'ism_ajax_bulk_resize_init' );
 add_action( 'wp_ajax_ism_bulk_resize_batch',  'ism_ajax_bulk_resize_batch' );
 add_action( 'wp_ajax_ism_descale_init',       'ism_ajax_descale_init' );
 add_action( 'wp_ajax_ism_descale_batch',      'ism_ajax_descale_batch' );
+
+// AJAX: Image SEO tab — scan, generate one image, apply reviewed rows
+add_action( 'wp_ajax_ism_seo_scan_init',  'ism_ajax_seo_scan_init' );
+add_action( 'wp_ajax_ism_seo_scan_batch', 'ism_ajax_seo_scan_batch' );
+add_action( 'wp_ajax_ism_seo_generate',   'ism_ajax_seo_generate' );
+add_action( 'wp_ajax_ism_seo_apply',      'ism_ajax_seo_apply' );
+add_action( 'wp_ajax_ism_seo_reset',      'ism_ajax_seo_reset' );
+
+// AJAX: usage index build (Image SEO tab depends on it)
+add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );
+add_action( 'wp_ajax_ism_usage_index_batch', 'ism_ajax_usage_index_batch' );
 
 // AJAX: image size usage scanner (read-only — uses its own nonce action)
 add_action( 'wp_ajax_ism_size_usage_scan',    'ism_ajax_size_usage_scan' );
@@ -784,6 +796,9 @@ function ism_enqueue_assets( string $hook ): void {
 		'maxUploadWidth' => (int) ism_get_settings()['max_upload_width'],
 		'maxUploadHeight'=> (int) ism_get_settings()['max_upload_height'],
 		'sizeUsageNonce' => wp_create_nonce( 'ism_size_usage_scan' ),
+		'seoNonce'       => wp_create_nonce( 'ism_seo' ),
+		'usageIndexNonce'=> wp_create_nonce( 'ism_usage_index' ),
+		// Deliberately absent: the API key. It is never sent to the browser.
 	] );
 }
 
@@ -929,6 +944,20 @@ function ism_handle_save(): void {
 			'allowed_sizes'    => $allowed,
 			'delete_images'    => ! empty( $rule['delete_images'] ) ? '1' : '0',
 		];
+	}
+
+	// ── Anthropic API key ────────────────────────────────────────────────────
+	// Stored by ism_ai_set_key() in its own option with autoload off, never in
+	// $settings — ism_get_settings() is partially passed to wp_localize_script().
+	// The field renders empty even when a key is stored, so an empty submission
+	// means "leave it alone"; clearing is an explicit checkbox.
+	if ( ! empty( $_POST['ism_api_key_clear'] ) ) {
+		ism_ai_set_key( '' );
+	} else {
+		$submitted_key = trim( (string) wp_unslash( $_POST['ism_api_key'] ?? '' ) );
+		if ( $submitted_key !== '' ) {
+			ism_ai_set_key( sanitize_text_field( $submitted_key ) );
+		}
 	}
 
 	// ── Max upload dimensions ────────────────────────────────────────────────

@@ -593,3 +593,84 @@
 }
 .ism-source-elementor { background: #ede8f5; color: #5e35b1; }
 .ism-source-content   { background: #d6e9f8; color: #1565c0; }
+
+/* ── Image SEO ──────────────────────────────────────────────────────────── */
+
+.ism-seo-summary { margin-top: 14px; }
+
+.ism-seo-stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 22px;
+	margin: 0 0 8px;
+	padding: 0;
+	list-style: none;
+}
+.ism-seo-stats li { color: #50575e; }
+.ism-seo-stats strong { display: block; font-size: 20px; color: #1d2327; }
+
+.ism-seo-table { margin-top: 12px; }
+.ism-seo-table td { vertical-align: middle; }
+.ism-seo-thumb-cell { width: 52px; }
+.ism-seo-table img { display: block; object-fit: cover; border-radius: 3px; }
+.ism-seo-nothumb {
+	display: block;
+	width: 40px;
+	height: 40px;
+	background: #f0f0f1;
+	border-radius: 3px;
+}
+
+.ism-seo-review-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin: 12px 0 16px;
+}
+.ism-seo-apply-status { color: #50575e; margin-left: 6px; }
+
+.ism-seo-review-row {
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 12px 14px;
+	margin-bottom: 12px;
+	background: #fff;
+}
+.ism-seo-row-error { border-color: #f0b7b8; background: #fcf0f1; }
+
+.ism-seo-review-head {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	margin-bottom: 10px;
+}
+.ism-seo-review-head img { object-fit: cover; border-radius: 3px; }
+.ism-seo-review-meta { flex: 1; min-width: 0; }
+.ism-seo-check { padding-top: 2px; }
+.ism-seo-error { color: #b32d2e; margin-top: 2px; }
+
+.ism-seo-fields {
+	display: grid;
+	gap: 10px;
+}
+.ism-seo-field label {
+	display: block;
+	font-weight: 600;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: .03em;
+	color: #50575e;
+	margin-bottom: 3px;
+}
+.ism-seo-was {
+	display: block;
+	margin-top: 3px;
+	font-size: 12px;
+	color: #787c82;
+	word-break: break-word;
+}
+.ism-seo-was-empty { font-style: italic; }
+
+#ism-seo-generate-log { max-height: 220px; overflow-y: auto; }
+#ism-seo-generate-log .ism-log-error { color: #b32d2e; }
