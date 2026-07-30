@@ -766,7 +766,18 @@
 }
 .ism-seo-place-nolink em { color: #a7aaad; }
 
-.ism-key-actions .button-link-delete { padding-left: 0; }
+/* Keep core's button padding. The destructive styling is colour only — a
+   flush-left link is too easy to hit by accident for something irreversible. */
+.ism-key-actions .button-link-delete {
+	color: #b32d2e;
+	border-color: #b32d2e;
+}
+.ism-key-actions .button-link-delete:hover:not(:disabled),
+.ism-key-actions .button-link-delete:focus:not(:disabled) {
+	background: #b32d2e;
+	border-color: #b32d2e;
+	color: #fff;
+}
 .ism-key-remove-status { margin-left: 8px; }
 
 /* ── Advanced AI settings ───────────────────────────────────────────────── */
