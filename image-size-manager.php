@@ -34,6 +34,7 @@ require_once ISM_PLUGIN_DIR . 'includes/ai-client.php';
 require_once ISM_PLUGIN_DIR . 'includes/file-hash.php';
 require_once ISM_PLUGIN_DIR . 'includes/seo-ajax.php';
 require_once ISM_PLUGIN_DIR . 'includes/broken-images.php';
+require_once ISM_PLUGIN_DIR . 'includes/broken-repoint.php';
 
 if ( is_admin() ) {
 	new ISM_GitHub_Updater( __FILE__, ISM_GITHUB_USER, ISM_GITHUB_REPO );
@@ -110,6 +111,8 @@ add_action( 'wp_ajax_ism_broken_init',    'ism_ajax_broken_init' );
 add_action( 'wp_ajax_ism_broken_batch',   'ism_ajax_broken_batch' );
 add_action( 'wp_ajax_ism_broken_suggest', 'ism_ajax_broken_suggest' );
 add_action( 'wp_ajax_ism_broken_choose',  'ism_ajax_broken_choose' );
+add_action( 'wp_ajax_ism_repoint_preview', 'ism_ajax_repoint_preview' );
+add_action( 'wp_ajax_ism_repoint_apply',   'ism_ajax_repoint_apply' );
 
 // AJAX: usage index build (Image SEO tab depends on it)
 add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );

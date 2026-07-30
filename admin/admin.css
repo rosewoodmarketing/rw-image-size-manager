@@ -959,3 +959,59 @@
 	font-weight: 700;
 	color: #1d7e2d;
 }
+
+/* ── Broken images: page grouping and repoint ───────────────────────────── */
+
+.ism-broken-page {
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	margin-bottom: 8px;
+	background: #fff;
+}
+.ism-broken-page-open { border-color: #2271b1; }
+
+.ism-broken-page-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	padding: 11px 14px;
+	background: #f6f7f7;
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+	text-align: left;
+	font-size: 13px;
+}
+.ism-broken-page-open .ism-broken-page-head { border-radius: 4px 4px 0 0; border-bottom: 1px solid #dcdcde; }
+.ism-broken-page-head:hover { background: #f0f0f1; }
+.ism-broken-caret { color: #50575e; width: 12px; flex: none; }
+.ism-broken-page-title { font-weight: 600; }
+.ism-broken-page-count { margin-left: auto; color: #b32d2e; font-weight: 600; white-space: nowrap; }
+
+.ism-broken-page-body { padding: 12px 14px; }
+.ism-broken-page-links { margin: 0 0 10px; }
+.ism-broken-page-body .ism-broken-row { background: #fbfbfc; }
+
+.ism-repoint-preview {
+	margin-top: 10px;
+	padding: 10px 12px;
+	background: #f0f6fc;
+	border: 1px solid #b9d6f2;
+	border-radius: 3px;
+}
+.ism-repoint-head { margin: 0 0 8px; }
+.ism-repoint-diff { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ism-repoint-diff th {
+	text-align: left;
+	padding: 3px 10px 3px 0;
+	white-space: nowrap;
+	vertical-align: top;
+	color: #50575e;
+	font-weight: 600;
+}
+.ism-repoint-diff td { padding: 3px 6px; vertical-align: top; word-break: break-all; }
+.ism-repoint-from { color: #b32d2e; text-decoration: line-through; }
+.ism-repoint-to { color: #1d7e2d; }
+.ism-repoint-arrow { color: #787c82; width: 18px; text-align: center; }
+.ism-repoint-error { color: #b32d2e; font-weight: 500; margin: 8px 0 0; }

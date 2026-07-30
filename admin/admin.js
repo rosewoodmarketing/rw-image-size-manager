@@ -2263,43 +2263,90 @@
 				? '<button type="button" class="button button-small ism-broken-find" data-key="' + esc( r.key ) + '" data-filename="' + esc( r.filename ) + '">Suggest matches</button> '
 				: '' )
 			+ '<button type="button" class="button button-small ism-broken-pick" data-key="' + esc( r.key ) + '">Choose from media library…</button>'
+			+ ( chosen
+				? ' <button type="button" class="button button-small button-primary ism-broken-preview" data-key="' + esc( r.key ) + '" data-id="' + chosen.id + '">Preview the fix</button>'
+				: '' )
 			+ '</div>'
 			+ '<div class="ism-broken-suggestions"></div>'
+			+ '<div class="ism-broken-preview-box"></div>'
 			+ '</div>';
 	}
 
+	// Grouped by page. A flat list of 110 references is a pile; the unit of work
+	// is "this page is broken", and fixing it means working through that page's
+	// images together.
+	function brokenPages() {
+		var vis = brokenVisible();
+		var by  = {};
+
+		vis.forEach( function ( r ) {
+			if ( ! by[ r.post_id ] ) {
+				by[ r.post_id ] = {
+					post_id: r.post_id, title: r.post_title, type: r.post_type,
+					refs: [], chosen: 0
+				};
+			}
+			by[ r.post_id ].refs.push( r );
+			if ( brokenChoices[ r.key ] ) { by[ r.post_id ].chosen++; }
+		} );
+
+		return Object.keys( by ).map( function ( k ) { return by[ k ]; } )
+			.sort( function ( a, b ) { return b.refs.length - a.refs.length || a.title.localeCompare( b.title ); } );
+	}
+
+	function brokenPageHtml( p ) {
+		var open = !! brokenOpenPages[ p.post_id ];
+
+		return '<div class="ism-broken-page' + ( open ? ' ism-broken-page-open' : '' ) + '" data-post="' + p.post_id + '">'
+			+ '<button type="button" class="ism-broken-page-head" data-post="' + p.post_id + '">'
+			+ '<span class="ism-broken-caret">' + ( open ? '▾' : '▸' ) + '</span>'
+			+ '<span class="ism-broken-page-title">' + esc( p.title ) + '</span>'
+			+ '<span class="description">' + esc( p.type ) + '</span>'
+			+ '<span class="ism-broken-page-count">' + p.refs.length + ' broken</span>'
+			+ ( p.chosen ? '<span class="ism-badge ism-badge-proposed">' + p.chosen + ' chosen</span>' : '' )
+			+ '</button>'
+			+ '<div class="ism-broken-page-body"' + ( open ? '' : ' hidden' ) + '>'
+			+ '<p class="ism-broken-page-links">'
+			+ '<a href="' + esc( ismData.adminUrl + 'post.php?post=' + p.post_id + '&action=edit' ) + '" target="_blank">Edit this page →</a>'
+			+ '</p>'
+			+ p.refs.map( brokenRowHtml ).join( '' )
+			+ '</div></div>';
+	}
+
 	function brokenRenderList() {
-		var vis   = brokenVisible();
-		var pages = Math.max( 1, Math.ceil( vis.length / BROKEN_PER_PAGE ) );
-		if ( brokenPage > pages ) { brokenPage = pages; }
+		var pages = brokenPages();
+		var total = brokenVisible().length;
+		var count = Math.max( 1, Math.ceil( pages.length / BROKEN_PER_PAGE ) );
+		if ( brokenPage > count ) { brokenPage = count; }
 
 		var start = ( brokenPage - 1 ) * BROKEN_PER_PAGE;
-		var slice = vis.slice( start, start + BROKEN_PER_PAGE );
+		var slice = pages.slice( start, start + BROKEN_PER_PAGE );
 
-		$( '.ism-broken-count' ).text( vis.length + ' shown of ' + brokenRefs.length );
+		$( '.ism-broken-count' ).text( pages.length + ' page' + ( pages.length === 1 ? '' : 's' ) + ' · ' + total + ' broken image' + ( total === 1 ? '' : 's' ) );
 		$( '#ism-broken-list' ).html( slice.length
-			? slice.map( brokenRowHtml ).join( '' )
+			? slice.map( brokenPageHtml ).join( '' )
 			: '<p class="description">Nothing matches this filter.</p>' );
 
-		if ( pages < 2 ) {
+		if ( count < 2 ) {
 			$( '.ism-broken-pager-top, .ism-broken-pager-bottom' ).empty();
 			return;
 		}
 
-		var html = '<span class="ism-seo-pager-info">' + ( start + 1 ) + '–' + ( start + slice.length ) + ' of ' + vis.length + '</span>'
+		$( '.ism-broken-pager-top, .ism-broken-pager-bottom' ).html(
+			'<span class="ism-seo-pager-info">Pages ' + ( start + 1 ) + '–' + ( start + slice.length ) + ' of ' + pages.length + '</span>'
 			+ '<button type="button" class="button ism-broken-prev"' + ( brokenPage === 1 ? ' disabled' : '' ) + '>‹ Prev</button>'
-			+ '<span class="ism-seo-pager-pos">Page ' + brokenPage + ' of ' + pages + '</span>'
-			+ '<button type="button" class="button ism-broken-next"' + ( brokenPage === pages ? ' disabled' : '' ) + '>Next ›</button>';
-		$( '.ism-broken-pager-top, .ism-broken-pager-bottom' ).html( html );
+			+ '<span class="ism-seo-pager-pos">Page ' + brokenPage + ' of ' + count + '</span>'
+			+ '<button type="button" class="button ism-broken-next"' + ( brokenPage === count ? ' disabled' : '' ) + '>Next ›</button>'
+		);
 	}
 
-	$( document ).on( 'change', '#ism-broken-filter', function () { brokenPage = 1; brokenRenderList(); } );
-	$( document ).on( 'input', '#ism-broken-search', function () {
-		clearTimeout( window.ismBrokenTimer );
-		window.ismBrokenTimer = setTimeout( function () { brokenPage = 1; brokenRenderList(); }, 250 );
+	var brokenOpenPages = {};
+
+	$( document ).on( 'click', '.ism-broken-page-head', function () {
+		var id = String( $( this ).data( 'post' ) );
+		if ( brokenOpenPages[ id ] ) { delete brokenOpenPages[ id ]; } else { brokenOpenPages[ id ] = true; }
+		brokenRenderList();
 	} );
-	$( document ).on( 'click', '.ism-broken-prev', function () { brokenPage--; brokenRenderList(); } );
-	$( document ).on( 'click', '.ism-broken-next', function () { brokenPage++; brokenRenderList(); } );
 
 	// ── Suggestions ─────────────────────────────────────────────────────────
 
@@ -2368,6 +2415,77 @@
 
 	$( document ).on( 'click', '.ism-broken-clear', function () {
 		brokenSaveChoice( String( $( this ).data( 'key' ) ), 0 );
+	} );
+
+	// ── Preview and repoint ─────────────────────────────────────────────────
+	//
+	// One reference at a time, previewed first, and never in bulk. The preview
+	// is regenerated server-side immediately before the write, so a reference
+	// edited since the scan is caught rather than written over.
+
+	$( document ).on( 'click', '.ism-broken-preview', function () {
+		var $btn = $( this );
+		var key  = String( $btn.data( 'key' ) );
+		var id   = parseInt( $btn.data( 'id' ), 10 );
+		var $box = $btn.closest( '.ism-broken-row' ).find( '.ism-broken-preview-box' );
+
+		$btn.prop( 'disabled', true ).text( 'Checking…' );
+
+		seoPost( 'ism_repoint_preview', { key: key, attachment_id: id }, function ( res ) {
+			$btn.prop( 'disabled', false ).text( 'Preview the fix' );
+
+            if ( ! res.success ) {
+				$box.html( '<p class="ism-repoint-error">' + esc( res.data || 'Could not preview.' ) + '</p>' );
+				return;
+			}
+
+			$box.html(
+				'<div class="ism-repoint-preview">'
+				+ '<p class="ism-repoint-head"><strong>' + esc( res.data.message ) + '</strong></p>'
+				+ '<table class="ism-repoint-diff"><tbody>'
+				+ res.data.changes.map( function ( c ) {
+					return '<tr><th>' + esc( c.label ) + '</th>'
+						+ '<td class="ism-repoint-from">' + esc( c.from ) + '</td>'
+						+ '<td class="ism-repoint-arrow">→</td>'
+						+ '<td class="ism-repoint-to">' + esc( c.to ) + '</td></tr>';
+				} ).join( '' )
+				+ '</tbody></table>'
+				+ '<p><button type="button" class="button button-primary ism-broken-apply" data-key="' + esc( key ) + '" data-id="' + id + '">Apply this fix</button>'
+				+ ' <span class="description">Writes to this page. One reference only.</span></p>'
+				+ '</div>'
+			);
+		}, function () {
+			$btn.prop( 'disabled', false ).text( 'Preview the fix' );
+			$box.html( '<p class="ism-repoint-error">Request failed.</p>' );
+		} );
+	} );
+
+	$( document ).on( 'click', '.ism-broken-apply', function () {
+		var $btn = $( this );
+		var key  = String( $btn.data( 'key' ) );
+		var id   = parseInt( $btn.data( 'id' ), 10 );
+
+		if ( ! window.confirm( 'Apply this fix? It rewrites this one reference on this one page. Nothing else changes.' ) ) { return; }
+
+		$btn.prop( 'disabled', true ).text( 'Applying…' );
+
+		seoPost( 'ism_repoint_apply', { key: key, attachment_id: id }, function ( res ) {
+			if ( ! res.success ) {
+				$btn.prop( 'disabled', false ).text( 'Apply this fix' );
+				$btn.closest( '.ism-broken-preview-box' ).find( '.ism-repoint-error' ).remove();
+				$btn.closest( '.ism-broken-preview' ).append( '<p class="ism-repoint-error">' + esc( res.data || 'Failed.' ) + '</p>' );
+				return;
+			}
+
+			// Fixed references leave the list; the server has already dropped it
+			// from the cached scan.
+			brokenRefs = brokenRefs.filter( function ( r ) { return r.key !== key; } );
+			delete brokenChoices[ key ];
+			brokenRenderSummary();
+			brokenRenderList();
+		}, function () {
+			$btn.prop( 'disabled', false ).text( 'Apply this fix' );
+		} );
 	} );
 
 	// Core's media modal, so any attachment can be picked when the automatic

@@ -340,6 +340,27 @@ function ism_broken_set_choice( string $key, int $attachment_id ): void {
 }
 
 /**
+ * Drop one reference from the cached scan, once it has been repaired.
+ *
+ * @param string $key
+ */
+function ism_broken_remove_ref( string $key ): void {
+	$cache = ism_broken_cache_get();
+	if ( $cache === null ) {
+		return;
+	}
+
+	$refs = array_values( array_filter( $cache['refs'], function ( $ref ) use ( $key ) {
+		return (string) ( $ref['key'] ?? '' ) !== $key;
+	} ) );
+
+	update_option( ISM_BROKEN_CACHE_KEY, [
+		'refs'       => $refs,
+		'scanned_at' => $cache['scanned_at'],
+	], false );
+}
+
+/**
  * Local path for an uploads URL, or an empty string when it is not one.
  *
  * @param string $url
