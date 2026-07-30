@@ -97,6 +97,8 @@ add_action( 'wp_ajax_ism_seo_generate',   'ism_ajax_seo_generate' );
 add_action( 'wp_ajax_ism_seo_apply',      'ism_ajax_seo_apply' );
 add_action( 'wp_ajax_ism_seo_reset',      'ism_ajax_seo_reset' );
 add_action( 'wp_ajax_ism_hash_batch',     'ism_ajax_hash_batch' );
+add_action( 'wp_ajax_ism_seo_review',     'ism_ajax_seo_review' );
+add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
 
 // AJAX: usage index build (Image SEO tab depends on it)
 add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );
@@ -960,14 +962,10 @@ function ism_handle_save(): void {
 	// Stored by ism_ai_set_key() in its own option with autoload off, never in
 	// $settings — ism_get_settings() is partially passed to wp_localize_script().
 	// The field renders empty even when a key is stored, so an empty submission
-	// means "leave it alone"; clearing is an explicit checkbox.
-	if ( ! empty( $_POST['ism_api_key_clear'] ) ) {
-		ism_ai_set_key( '' );
-	} else {
-		$submitted_key = trim( (string) wp_unslash( $_POST['ism_api_key'] ?? '' ) );
-		if ( $submitted_key !== '' ) {
-			ism_ai_set_key( sanitize_text_field( $submitted_key ) );
-		}
+	// means "leave it alone". Removing a key is a button, handled over AJAX.
+	$submitted_key = trim( (string) wp_unslash( $_POST['ism_api_key'] ?? '' ) );
+	if ( $submitted_key !== '' ) {
+		ism_ai_set_key( sanitize_text_field( $submitted_key ) );
 	}
 
 	// ── Max upload dimensions ────────────────────────────────────────────────

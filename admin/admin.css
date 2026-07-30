@@ -733,3 +733,38 @@
 .ism-seo-field-changed textarea { border-color: #7ac47f; }
 
 .ism-seo-override { flex: none; }
+
+/* ── Image SEO: pagination, review, link states ─────────────────────────── */
+
+.ism-seo-pager {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin: 12px 0;
+}
+.ism-seo-pager:empty { display: none; }
+.ism-seo-pager-info { color: #50575e; margin-right: auto; }
+.ism-seo-pager-pos { color: #50575e; }
+.ism-seo-page-input { width: 60px; }
+
+.ism-seo-show-reviewed { white-space: nowrap; }
+
+.ism-seo-row-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	flex: none;
+}
+
+.ism-badge-reviewed { background: #e3f5e6; color: #1d7e2d; }
+
+.ism-seo-place-nolink {
+	background: #fafafa;
+	border-style: dashed;
+	color: #646970;
+}
+.ism-seo-place-nolink em { color: #a7aaad; }
+
+.ism-key-actions .button-link-delete { padding-left: 0; }
+.ism-key-remove-status { margin-left: 8px; }

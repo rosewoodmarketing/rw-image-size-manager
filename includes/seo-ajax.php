@@ -25,11 +25,70 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-/** Attachments classified per scan batch. Cheap work, so the batch is large. */
+/** Attachments classified per scan batch. Bounded by the work per row. */
 define( 'ISM_SEO_SCAN_BATCH', 100 );
 
-/** Referencing pages named per row before the list is truncated. */
-define( 'ISM_SEO_USED_ON_SHOWN', 2 );
+/**
+ * Rows returned per batch when serving a cached scan.
+ *
+ * Larger than a fresh scan's batch because the cost here is per request, not
+ * per row: each one unserialises the whole stored scan, so fewer, fatter
+ * responses beat many thin ones.
+ */
+define( 'ISM_SEO_CACHE_BATCH', 400 );
+
+/** Where the cached scan lives. Site-wide: the classification is objective. */
+define( 'ISM_SEO_CACHE_KEY', 'ism_seo_scan_cache' );
+
+/** Marks an attachment as checked off by a human. */
+define( 'ISM_SEO_REVIEWED_META', '_ism_seo_reviewed' );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scan cache
+//
+// Classifying 843 images means a usage lookup, a skip test and a file probe
+// each. That is a few seconds of work whose answer does not change between page
+// loads, so it is computed once and kept. Rescan is an explicit button, because
+// the cache going stale after an upload is obvious and cheap to fix, whereas
+// re-deriving it on every visit is a tax on every visit.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The cached scan, or null when there is none.
+ *
+ * @return array{rows:array, scanned_at:int}|null
+ */
+function ism_seo_cache_get(): ?array {
+	$cache = get_option( ISM_SEO_CACHE_KEY, null );
+
+	if ( ! is_array( $cache ) || empty( $cache['rows'] ) ) {
+		return null;
+	}
+
+	return [
+		'rows'       => (array) $cache['rows'],
+		'scanned_at' => (int) ( $cache['scanned_at'] ?? 0 ),
+	];
+}
+
+/**
+ * Replace the cached scan.
+ *
+ * @param array $rows
+ */
+function ism_seo_cache_set( array $rows ): void {
+	update_option( ISM_SEO_CACHE_KEY, [
+		'rows'       => $rows,
+		'scanned_at' => time(),
+	], false );
+}
+
+/**
+ * Drop the cached scan.
+ */
+function ism_seo_cache_clear(): void {
+	delete_option( ISM_SEO_CACHE_KEY );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Run state
@@ -140,13 +199,33 @@ function ism_seo_row( int $attachment_id ): array {
 
 	$places = [];
 	foreach ( $usages as $usage ) {
+		// Not every place can be linked. A post whose type is no longer
+		// registered — content left behind by a removed plugin — has no edit
+		// screen, and a site-wide option has no URL at all. Fall back to the
+		// permalink, then to plain text with a reason, rather than rendering a
+		// dead link or silently dropping the row.
+		$link   = (string) $usage['edit_url'];
+		$reason = '';
+
+		if ( $link === '' ) {
+			$link = (string) $usage['permalink'];
+		}
+
+		if ( $link === '' ) {
+			if ( ( $usage['object_type'] ?? 'post' ) === 'option' ) {
+				$reason = 'site-wide option — no page to open';
+			} else {
+				$reason = 'post type "' . $usage['post_type'] . '" is no longer registered';
+			}
+		}
+
 		$places[] = [
-			'title'     => (string) $usage['title'],
-			'type'      => (string) $usage['post_type'],
-			'source'    => (string) $usage['source'],
-			'featured'  => $usage['source'] === 'featured',
-			'edit_url'  => (string) $usage['edit_url'],
-			'permalink' => (string) $usage['permalink'],
+			'title'    => (string) $usage['title'],
+			'type'     => (string) $usage['post_type'],
+			'source'   => (string) $usage['source'],
+			'featured' => $usage['source'] === 'featured',
+			'link'     => $link,
+			'reason'   => $reason,
 		];
 	}
 
@@ -171,6 +250,21 @@ function ism_seo_row( int $attachment_id ): array {
 
 	$thumb = wp_get_attachment_image_src( $attachment_id, 'thumbnail' );
 
+	$current = [
+		'title'       => $post ? (string) $post->post_title : '',
+		'alt_text'    => (string) get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
+		'description' => $post ? (string) $post->post_content : '',
+	];
+
+	// Which of the three fields are empty, so the chart can offer "missing
+	// anything" as a filter rather than only "missing alt text".
+	$missing = [];
+	foreach ( $current as $field => $value ) {
+		if ( trim( $value ) === '' ) {
+			$missing[] = $field;
+		}
+	}
+
 	return [
 		'id'           => $attachment_id,
 		'filename'     => $file ? basename( $file ) : '',
@@ -184,11 +278,9 @@ function ism_seo_row( int $attachment_id ): array {
 		'client_url'   => $needs_client ? ism_vision_client_url( $attachment_id ) : '',
 		'used_count'   => count( $usages ),
 		'places'       => $places,
-		'current'      => [
-			'title'       => $post ? (string) $post->post_title : '',
-			'alt_text'    => (string) get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
-			'description' => $post ? (string) $post->post_content : '',
-		],
+		'current'      => $current,
+		'missing'      => $missing,
+		'reviewed'     => (int) get_post_meta( $attachment_id, ISM_SEO_REVIEWED_META, true ) > 0,
 	];
 }
 
@@ -201,6 +293,13 @@ function ism_ajax_seo_scan_init(): void {
 		wp_send_json_error( 'Unauthorized', 403 );
 	}
 
+	$force = ! empty( $_POST['force'] );
+	$cache = $force ? null : ism_seo_cache_get();
+
+	if ( $force ) {
+		ism_seo_cache_clear();
+	}
+
 	$ids = ism_seo_collect_attachment_ids();
 
 	// Proposals already generated survive a rescan, so a reload does not throw
@@ -208,6 +307,10 @@ function ism_ajax_seo_scan_init(): void {
 	$state = ism_seo_get_state();
 
 	wp_send_json_success( [
+		'cached'       => $cache !== null,
+		'scanned_at'   => $cache ? $cache['scanned_at'] : 0,
+		'scanned_ago'  => $cache && $cache['scanned_at'] ? human_time_diff( $cache['scanned_at'] ) : '',
+		'cached_total' => $cache ? count( $cache['rows'] ) : 0,
 		'total'        => count( $ids ),
 		'has_key'      => ism_ai_has_key(),
 		'model'        => ism_ai_get_model(),
@@ -229,9 +332,29 @@ function ism_ajax_seo_scan_batch(): void {
 
 	@set_time_limit( 120 ); // phpcs:ignore
 
-	$offset = max( 0, (int) ( $_POST['offset'] ?? 0 ) );
-	$ids    = ism_seo_collect_attachment_ids();
-	$batch  = array_slice( $ids, $offset, ISM_SEO_SCAN_BATCH );
+	$offset    = max( 0, (int) ( $_POST['offset'] ?? 0 ) );
+	$use_cache = ! empty( $_POST['cached'] );
+
+	// Serving from cache still goes through the same paging loop, so the
+	// browser has one code path and a warm load still shows progress.
+	if ( $use_cache ) {
+		$cache = ism_seo_cache_get();
+		if ( $cache !== null ) {
+			$rows       = array_slice( $cache['rows'], $offset, ISM_SEO_CACHE_BATCH );
+			$new_offset = $offset + count( $rows );
+
+			wp_send_json_success( [
+				'rows'   => $rows,
+				'offset' => $new_offset,
+				'total'  => count( $cache['rows'] ),
+				'done'   => $new_offset >= count( $cache['rows'] ),
+				'cached' => true,
+			] );
+		}
+	}
+
+	$ids   = ism_seo_collect_attachment_ids();
+	$batch = array_slice( $ids, $offset, ISM_SEO_SCAN_BATCH );
 
 	$rows = [];
 	foreach ( $batch as $id ) {
@@ -239,12 +362,29 @@ function ism_ajax_seo_scan_batch(): void {
 	}
 
 	$new_offset = $offset + count( $batch );
+	$done       = $new_offset >= count( $ids );
+
+	// Accumulate into the cache as the scan runs, so an interrupted scan does
+	// not leave a half-written cache claiming to be complete.
+	$partial = get_option( ISM_SEO_CACHE_KEY . '_partial', [] );
+	if ( $offset === 0 || ! is_array( $partial ) ) {
+		$partial = [];
+	}
+	$partial = array_merge( $partial, $rows );
+
+	if ( $done ) {
+		ism_seo_cache_set( $partial );
+		delete_option( ISM_SEO_CACHE_KEY . '_partial' );
+	} else {
+		update_option( ISM_SEO_CACHE_KEY . '_partial', $partial, false );
+	}
 
 	wp_send_json_success( [
 		'rows'   => $rows,
 		'offset' => $new_offset,
 		'total'  => count( $ids ),
-		'done'   => $new_offset >= count( $ids ),
+		'done'   => $done,
+		'cached' => false,
 	] );
 }
 
@@ -474,11 +614,96 @@ function ism_ajax_seo_apply(): void {
 	}
 	ism_seo_set_state( $state );
 
+	// Keep the cache in step with what was just written, so the chart's
+	// "currently:" lines and missing-field filters stay accurate without a rescan.
+	$touched = [];
+	foreach ( $rows as $row ) {
+		foreach ( (array) ( $row['ids'] ?? [ $row['id'] ?? 0 ] ) as $id ) {
+			$touched[] = (int) $id;
+		}
+	}
+	ism_seo_cache_touch( $touched, function ( array $row ) {
+		$fresh = ism_seo_row( (int) $row['id'] );
+		// Reviewed state is not re-derived from the write; keep what was there.
+		$fresh['reviewed'] = ! empty( $row['reviewed'] );
+		return $fresh;
+	} );
+
 	wp_send_json_success( [
 		'applied'  => $applied,
 		'skipped'  => $skipped,
 		'messages' => array_slice( $messages, 0, 50 ),
 	] );
+}
+
+/**
+ * AJAX: mark a group reviewed, or clear the mark.
+ *
+ * Reviewed is per attachment and stored on the attachment, so it survives a
+ * rescan, a reload and a different admin user. The whole point is that going
+ * through a 700-image library is work you do once.
+ */
+function ism_ajax_seo_review(): void {
+	check_ajax_referer( 'ism_seo', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	$ids      = array_values( array_filter( array_map( 'intval', (array) ( $_POST['ids'] ?? [] ) ) ) );
+	$reviewed = ! empty( $_POST['reviewed'] );
+
+	if ( empty( $ids ) ) {
+		wp_send_json_error( 'No attachment specified.' );
+	}
+
+	foreach ( $ids as $id ) {
+		if ( get_post_type( $id ) !== 'attachment' ) {
+			continue;
+		}
+		if ( $reviewed ) {
+			update_post_meta( $id, ISM_SEO_REVIEWED_META, time() );
+		} else {
+			delete_post_meta( $id, ISM_SEO_REVIEWED_META );
+		}
+	}
+
+	ism_seo_cache_touch( $ids, function ( array $row ) use ( $reviewed ) {
+		$row['reviewed'] = $reviewed;
+		return $row;
+	} );
+
+	wp_send_json_success( [ 'ids' => $ids, 'reviewed' => $reviewed ] );
+}
+
+/**
+ * Update cached rows in place after a write, so the cache does not go stale in
+ * a way that would force a rescan for something the server already knows.
+ *
+ * @param int[]    $ids
+ * @param callable $mutate Receives a row, returns the replacement.
+ */
+function ism_seo_cache_touch( array $ids, callable $mutate ): void {
+	$cache = ism_seo_cache_get();
+	if ( $cache === null ) {
+		return;
+	}
+
+	$wanted  = array_flip( array_map( 'intval', $ids ) );
+	$changed = false;
+
+	foreach ( $cache['rows'] as $i => $row ) {
+		if ( isset( $wanted[ (int) ( $row['id'] ?? 0 ) ] ) ) {
+			$cache['rows'][ $i ] = $mutate( $row );
+			$changed             = true;
+		}
+	}
+
+	if ( $changed ) {
+		update_option( ISM_SEO_CACHE_KEY, [
+			'rows'       => $cache['rows'],
+			'scanned_at' => $cache['scanned_at'],
+		], false );
+	}
 }
 
 /**

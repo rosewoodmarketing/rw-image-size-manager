@@ -1010,6 +1010,8 @@
 	var seoEdits     = {};   // group key -> { title, alt_text, description }
 	var seoAborted   = false;
 	var seoHasKey    = false;
+	var seoPage      = 1;
+	var SEO_PER_PAGE = 50;
 
 	function seoPost( action, data, done, fail ) {
 		data = $.extend( { action: action, nonce: ismData.seoNonce }, data || {} );
@@ -1082,8 +1084,8 @@
 		}, onDone );
 	}
 
-	function seoScanRun( offset ) {
-		seoPost( 'ism_seo_scan_batch', { offset: offset }, function ( res ) {
+	function seoScanRun( offset, cached ) {
+		seoPost( 'ism_seo_scan_batch', { offset: offset, cached: cached ? 1 : 0 }, function ( res ) {
 			if ( ! res.success ) {
 				$( '#ism-seo-scan-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
 				$( '#ism-seo-scan-start' ).prop( 'disabled', false );
@@ -1091,47 +1093,68 @@
 			}
 			var d = res.data;
 			seoRows = seoRows.concat( d.rows );
-			$( '#ism-seo-scan-bar' ).css( 'width', ( 50 + ( d.total ? Math.round( ( d.offset / d.total ) * 50 ) : 50 ) ) + '%' );
-			$( '#ism-seo-scan-status' ).text( d.offset + ' / ' + d.total + ' images classified' );
+			$( '#ism-seo-scan-bar' ).css( 'width', ( cached ? 0 : 50 ) + ( d.total ? Math.round( ( d.offset / d.total ) * ( cached ? 100 : 50 ) ) : 50 ) + '%' );
+			$( '#ism-seo-scan-status' ).text( d.offset + ' / ' + d.total + ( cached ? ' images loaded' : ' images classified' ) );
 			if ( d.done ) {
-				$( '#ism-seo-scan-status' ).text( 'Scan complete — ' + d.total + ' images.' );
+				$( '#ism-seo-scan-status' ).text( ( cached ? 'Loaded ' : 'Scan complete — ' ) + d.total + ' images.' );
 				$( '#ism-seo-scan-start' ).prop( 'disabled', false );
+				$( '#ism-seo-rescan' ).prop( 'disabled', false );
+				seoPage = 1;
 				seoBuildGroups();
 				seoRenderSummary();
 				seoRenderChart();
 				seoRenderReview();
 				return;
 			}
-			setTimeout( function () { seoScanRun( d.offset ); }, 50 );
+			setTimeout( function () { seoScanRun( d.offset, cached ); }, cached ? 10 : 50 );
 		}, function () {
 			$( '#ism-seo-scan-status' ).text( 'Request failed. Reload and try again.' );
 			$( '#ism-seo-scan-start' ).prop( 'disabled', false );
+			$( '#ism-seo-rescan' ).prop( 'disabled', false );
 		} );
 	}
 
-	$( document ).on( 'click', '#ism-seo-scan-start', function () {
-		$( this ).prop( 'disabled', true );
+	// force = true rebuilds the classification from scratch. Otherwise a stored
+	// scan is loaded straight back, because classifying 800 images is work whose
+	// answer does not change between page loads.
+	function seoStartScan( force ) {
 		seoRows = [];
 		seoGroups = [];
+		$( '#ism-seo-scan-start, #ism-seo-rescan' ).prop( 'disabled', true );
 		$( '#ism-seo-scan-progress' ).show();
 		$( '#ism-seo-scan-bar' ).css( 'width', '0%' );
-		$( '#ism-seo-scan-status' ).text( 'Starting…' );
+		$( '#ism-seo-scan-status' ).text( force ? 'Rescanning…' : 'Loading…' );
 
-		seoPost( 'ism_seo_scan_init', {}, function ( res ) {
+		seoPost( 'ism_seo_scan_init', { force: force ? 1 : 0 }, function ( res ) {
 			if ( ! res.success ) {
 				$( '#ism-seo-scan-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
-				$( '#ism-seo-scan-start' ).prop( 'disabled', false );
+				$( '#ism-seo-scan-start, #ism-seo-rescan' ).prop( 'disabled', false );
 				return;
 			}
-			// Proposals generated earlier survive a reload, so a scan restores
-			// them rather than discarding work that has already been paid for.
+			// Proposals generated earlier survive a reload, so this restores them
+			// rather than discarding work that has already been paid for.
 			seoProposals = res.data.results || {};
 			seoHasKey    = !! res.data.has_key;
+
 			if ( ! res.data.index_built ) {
 				$( '#ism-seo-scan-status' ).text( 'The usage index has not been built — every image will look unused. Build it first.' );
 			}
-			seoHashRun( 0, function () { seoScanRun( 0 ); } );
+
+			if ( res.data.cached ) {
+				$( '.ism-seo-scan-state' ).text( 'Using the scan from ' + res.data.scanned_ago + ' ago. Rescan after uploading or deleting images.' );
+				seoScanRun( 0, true );
+				return;
+			}
+
+			$( '.ism-seo-scan-state' ).text( 'No stored scan — classifying the library now.' );
+			seoHashRun( 0, function () { seoScanRun( 0, false ); } );
 		} );
+	}
+
+	$( document ).on( 'click', '#ism-seo-scan-start', function () { seoStartScan( false ); } );
+	$( document ).on( 'click', '#ism-seo-rescan', function () {
+		if ( ! window.confirm( 'Rescan the whole library? This re-reads every file and takes a minute or so. Your proposals and reviewed marks are kept.' ) ) { return; }
+		seoStartScan( true );
 	} );
 
 	// ── Grouping ────────────────────────────────────────────────────────────
@@ -1168,6 +1191,11 @@
 
 			g.rep    = g.rows[ 0 ];
 			g.copies = g.ids.length;
+
+			// Reviewed only counts when every copy is marked, so a duplicate
+			// group cannot disappear from the chart while half of it is unchecked.
+			g.reviewed = g.rows.every( function ( r ) { return r.reviewed; } );
+			g.missing  = g.rep.missing || [];
 
 			// A group is only "ready" if some copy is; a duplicate that happens
 			// to be referenced nowhere should not drag the whole picture into
@@ -1240,15 +1268,23 @@
 	// ── Chart ───────────────────────────────────────────────────────────────
 
 	function seoVisibleGroups() {
-		var filter = $( '#ism-seo-filter' ).val() || 'ready';
-		var term   = ( $( '#ism-seo-search' ).val() || '' ).toLowerCase();
+		var filter       = $( '#ism-seo-filter' ).val() || 'ready';
+		var term         = ( $( '#ism-seo-search' ).val() || '' ).toLowerCase();
+		var showReviewed = $( '#ism-seo-show-reviewed' ).is( ':checked' );
 
 		return seoGroups.filter( function ( g ) {
+			// Reviewed images stay out of the way until asked for. Checking one
+			// off is how you make progress through a 700-image library visible.
+			if ( g.reviewed && ! showReviewed ) { return false; }
+
 			if ( filter === 'ready'   && g.group !== 'ready' ) { return false; }
 			if ( filter === 'noalt'   && ( g.group !== 'ready' || g.rep.current.alt_text ) ) { return false; }
 			if ( filter === 'skipped' && g.group !== 'skipped' ) { return false; }
 			if ( filter === 'unused'  && g.group !== 'unused' ) { return false; }
 			if ( filter === 'dupes'   && g.copies < 2 ) { return false; }
+			if ( filter === 'missing'       && ! g.missing.length ) { return false; }
+			if ( filter === 'missing_title' && g.missing.indexOf( 'title' ) === -1 ) { return false; }
+			if ( filter === 'missing_desc'  && g.missing.indexOf( 'description' ) === -1 ) { return false; }
 
 			if ( term ) {
 				var hay = g.rep.filename.toLowerCase() + ' '
@@ -1272,10 +1308,12 @@
 			seen[ k ] = true;
 			var label = esc( p.title || '(no title)' );
 			var cls   = p.featured ? 'ism-seo-place ism-seo-place-featured' : 'ism-seo-place';
-			var tip   = p.featured ? 'featured image' : p.source;
-			var inner = p.edit_url ? '<a href="' + esc( p.edit_url ) + '" target="_blank">' + label + '</a>' : label;
+			if ( ! p.link ) { cls += ' ism-seo-place-nolink'; }
+			var tip   = p.reason || ( p.featured ? 'featured image' : p.source );
+			var inner = p.link ? '<a href="' + esc( p.link ) + '" target="_blank">' + label + '</a>' : label;
 			out.push( '<span class="' + cls + '" title="' + esc( tip ) + '">' + inner
-				+ '<em>' + esc( p.type ) + ( p.featured ? ' · featured' : '' ) + '</em></span>' );
+				+ '<em>' + esc( p.type ) + ( p.featured ? ' · featured' : '' )
+				+ ( p.link ? '' : ' · not linkable' ) + '</em></span>' );
 		} );
 		return out.join( '' );
 	}
@@ -1289,7 +1327,12 @@
 		}
 		if ( g.group === 'unused' ) { b += '<span class="ism-badge ism-badge-unused">no page</span>'; }
 		if ( g.needs_client ) { b += '<span class="ism-badge ism-badge-client">browser convert</span>'; }
-		if ( ! g.rep.current.alt_text ) { b += '<span class="ism-badge ism-badge-noalt">no alt</span>'; }
+		if ( g.missing.length ) {
+			b += '<span class="ism-badge ism-badge-noalt">missing ' + esc( g.missing.map( function ( f ) {
+				return f === 'alt_text' ? 'alt' : f;
+			} ).join( ', ' ) ) + '</span>';
+		}
+		if ( g.reviewed ) { b += '<span class="ism-badge ism-badge-reviewed">reviewed</span>'; }
 		var p = seoGroupProposal( g );
 		if ( p && ! p.error ) { b += '<span class="ism-badge ism-badge-proposed">proposed</span>'; }
 		if ( p && p.error )   { b += '<span class="ism-badge ism-badge-failed">failed</span>'; }
@@ -1315,9 +1358,13 @@
 			+ '<div class="ism-seo-badges">' + seoBadges( g ) + '</div>'
 			+ '<div class="ism-seo-places">' + seoPlacesHtml( g ) + '</div>'
 			+ '</div>'
+			+ '<div class="ism-seo-row-actions">'
 			+ ( g.group !== 'ready'
 				? '<button type="button" class="button button-small ism-seo-override" data-key="' + esc( g.key ) + '">Generate anyway</button>'
 				: '' )
+			+ '<button type="button" class="button button-small ism-seo-review" data-key="' + esc( g.key ) + '">'
+			+ ( g.reviewed ? 'Un-review' : 'Reviewed' ) + '</button>'
+			+ '</div>'
 			+ '</div>'
 			+ ( p && p.error ? '<div class="ism-seo-error">' + esc( p.error ) + '</div>' : '' )
 			+ '<div class="ism-seo-fields">'
@@ -1355,20 +1402,80 @@
 			return;
 		}
 
-		// Cap the DOM; a 700-row chart with three inputs each is unusable and slow.
-		var slice = vis.slice( 0, 200 );
-		var html  = slice.map( seoRowHtml ).join( '' );
-		if ( vis.length > slice.length ) {
-			html += '<p class="description">Showing the first ' + slice.length + ' of ' + vis.length
-				+ '. Narrow the filter or search to see the rest — ticking and generating still work on what is shown.</p>';
-		}
-		$( '#ism-seo-chart' ).html( html );
+		// Paged rather than capped: a 700-row chart with three inputs each is
+		// unusable, but silently hiding the tail is worse.
+		var pages = Math.max( 1, Math.ceil( vis.length / SEO_PER_PAGE ) );
+		if ( seoPage > pages ) { seoPage = pages; }
+
+		var start = ( seoPage - 1 ) * SEO_PER_PAGE;
+		var slice = vis.slice( start, start + SEO_PER_PAGE );
+
+		$( '#ism-seo-chart' ).html( slice.map( seoRowHtml ).join( '' ) );
+		seoRenderPager( vis.length, pages, start, slice.length );
 	}
 
-	$( document ).on( 'change', '#ism-seo-filter', seoRenderChart );
+	function seoRenderPager( total, pages, start, shown ) {
+		if ( pages < 2 ) {
+			$( '.ism-seo-pager' ).empty();
+			return;
+		}
+
+		var html = '<span class="ism-seo-pager-info">'
+			+ ( start + 1 ) + '–' + ( start + shown ) + ' of ' + total + '</span>'
+			+ '<button type="button" class="button ism-seo-page-first"' + ( seoPage === 1 ? ' disabled' : '' ) + '>«</button>'
+			+ '<button type="button" class="button ism-seo-page-prev"' + ( seoPage === 1 ? ' disabled' : '' ) + '>‹ Prev</button>'
+			+ '<span class="ism-seo-pager-pos">Page <input type="number" class="small-text ism-seo-page-input" value="' + seoPage
+			+ '" min="1" max="' + pages + '" /> of ' + pages + '</span>'
+			+ '<button type="button" class="button ism-seo-page-next"' + ( seoPage === pages ? ' disabled' : '' ) + '>Next ›</button>'
+			+ '<button type="button" class="button ism-seo-page-last"' + ( seoPage === pages ? ' disabled' : '' ) + '>»</button>';
+
+		$( '.ism-seo-pager' ).html( html );
+	}
+
+	function seoGoToPage( n ) {
+		var pages = Math.max( 1, Math.ceil( seoVisibleGroups().length / SEO_PER_PAGE ) );
+		seoPage = Math.min( pages, Math.max( 1, n ) );
+		seoRenderChart();
+		var top = $( '#ism-seo-chart-card' ).offset();
+		if ( top ) { $( 'html, body' ).animate( { scrollTop: top.top - 40 }, 150 ); }
+	}
+
+	$( document ).on( 'click', '.ism-seo-page-first', function () { seoGoToPage( 1 ); } );
+	$( document ).on( 'click', '.ism-seo-page-prev',  function () { seoGoToPage( seoPage - 1 ); } );
+	$( document ).on( 'click', '.ism-seo-page-next',  function () { seoGoToPage( seoPage + 1 ); } );
+	$( document ).on( 'click', '.ism-seo-page-last',  function () {
+		seoGoToPage( Math.ceil( seoVisibleGroups().length / SEO_PER_PAGE ) );
+	} );
+	$( document ).on( 'change', '.ism-seo-page-input', function () {
+		seoGoToPage( parseInt( $( this ).val(), 10 ) || 1 );
+	} );
+
+	// Reviewed is stored on the attachment, so it survives a rescan and a reload.
+	$( document ).on( 'click', '.ism-seo-review', function () {
+		var g = seoGroupByKey( String( $( this ).data( 'key' ) ) );
+		if ( ! g ) { return; }
+
+		var next = ! g.reviewed;
+		var $btn = $( this ).prop( 'disabled', true );
+
+		seoPost( 'ism_seo_review', { ids: g.ids, reviewed: next ? 1 : 0 }, function ( res ) {
+			$btn.prop( 'disabled', false );
+			if ( ! res.success ) { return; }
+			g.reviewed = next;
+			g.rows.forEach( function ( r ) { r.reviewed = next; } );
+			seoRenderChart();
+		}, function () {
+			$btn.prop( 'disabled', false );
+		} );
+	} );
+
+	$( document ).on( 'change', '#ism-seo-filter, #ism-seo-show-reviewed', function () {
+		seoPage = 1;
+		seoRenderChart();
+	} );
 	$( document ).on( 'input', '#ism-seo-search', function () {
 		clearTimeout( window.ismSeoSearchTimer );
-		window.ismSeoSearchTimer = setTimeout( seoRenderChart, 250 );
+		window.ismSeoSearchTimer = setTimeout( function () { seoPage = 1; seoRenderChart(); }, 250 );
 	} );
 
 	$( document ).on( 'change', '.ism-seo-tick', function () {
@@ -1632,6 +1739,27 @@
 			seoRenderChart();
 			seoRenderReview();
 			$( '.ism-seo-apply-status' ).text( 'Proposals discarded.' );
+		} );
+	} );
+
+	$( document ).on( 'click', '#ism-remove-key', function () {
+		if ( ! window.confirm( 'Remove the stored API key? Generation stops working until a new one is saved. Everything else in this tab keeps working.' ) ) { return; }
+		var $btn = $( this ).prop( 'disabled', true );
+		$( '.ism-key-remove-status' ).text( 'Removing…' );
+		seoPost( 'ism_ai_clear_key', {}, function ( res ) {
+			$btn.prop( 'disabled', false );
+			if ( ! res.success ) {
+				$( '.ism-key-remove-status' ).text( 'Could not remove the key.' );
+				return;
+			}
+			seoHasKey = false;
+			$( '.ism-key-state' ).html( '<span style="color:#996800;font-weight:500">No key — generation disabled</span>' );
+			$( '.ism-key-actions' ).hide();
+			$( '.ism-key-remove-status' ).text( '' );
+			$( '#ism-seo-generate-start' ).prop( 'disabled', true );
+		}, function () {
+			$btn.prop( 'disabled', false );
+			$( '.ism-key-remove-status' ).text( 'Request failed.' );
 		} );
 	} );
 

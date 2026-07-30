@@ -141,6 +141,24 @@ function ism_ai_has_key(): bool {
 	return ism_ai_get_key() !== '';
 }
 
+/**
+ * AJAX: remove the stored key.
+ *
+ * A button rather than a checkbox-plus-save: clearing a credential is a single
+ * decisive act, and burying it behind "tick this, then scroll down and save"
+ * makes it both easy to arm by accident and easy to leave half-done.
+ */
+function ism_ajax_ai_clear_key(): void {
+	check_ajax_referer( 'ism_seo', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	ism_ai_set_key( '' );
+
+	wp_send_json_success( [ 'has_key' => ism_ai_has_key() ] );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Model capabilities
 // ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +267,33 @@ function ism_ai_models(): array {
 			'note'      => 'Kept for sites that validated against it and do not want the output to move.',
 		],
 	];
+}
+
+/**
+ * Roughly what 100 images cost on a model.
+ *
+ * Per-million-token pricing is the wrong unit for someone deciding whether to
+ * run a 700-image library — it needs mental arithmetic across two different
+ * numbers. This converts to the figure the decision actually turns on, using
+ * the token counts measured on a real run.
+ *
+ * @param string $model
+ * @return float Dollars per 100 images.
+ */
+function ism_ai_cost_per_100( string $model ): float {
+	$m = ism_ai_models()[ $model ] ?? null;
+	if ( ! $m ) {
+		return 0.0;
+	}
+
+	// Measured on the pilot site: a 300px image, a few hundred characters of
+	// page context, and the JSON that comes back.
+	$input_tokens  = 700;
+	$output_tokens = 150;
+
+	$per_image = ( $input_tokens * $m['in'] / 1000000 ) + ( $output_tokens * $m['out'] / 1000000 );
+
+	return $per_image * 100;
 }
 
 /**

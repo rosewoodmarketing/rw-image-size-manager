@@ -513,14 +513,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 						<?php endif; ?>
 					</span>
 				</p>
-				<?php if ( $ism_has_key ) : ?>
-				<p>
-					<label>
-						<input type="checkbox" name="ism_api_key_clear" value="1" />
-						<?php esc_html_e( 'Remove the stored key', 'image-size-manager' ); ?>
-					</label>
+				<p class="ism-key-actions" <?php echo $ism_has_key ? '' : 'style="display:none"'; ?>>
+					<button type="button" class="button button-link-delete" id="ism-remove-key">
+						<?php esc_html_e( 'Remove stored key', 'image-size-manager' ); ?>
+					</button>
+					<span class="ism-key-remove-status description"></span>
 				</p>
-				<?php endif; ?>
 			</div>
 
 			<!-- Generation settings ─────────────────────────────────────── -->
@@ -537,10 +535,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 									<option value="<?php echo esc_attr( $ism_mid ); ?>" <?php selected( $ism_current_model, $ism_mid ); ?>>
 										<?php
 										printf(
-											'%s — $%s / $%s per million tokens',
+											'%s — about $%s per 100 images',
 											esc_html( $ism_m['label'] ),
-											esc_html( number_format( $ism_m['in'], 2 ) ),
-											esc_html( number_format( $ism_m['out'], 2 ) )
+											esc_html( number_format( ism_ai_cost_per_100( $ism_mid ), 2 ) )
 										);
 										?>
 									</option>
@@ -550,6 +547,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 								<p class="description ism-model-note" data-model="<?php echo esc_attr( $ism_mid ); ?>"
 									<?php echo $ism_current_model === $ism_mid ? '' : 'style="display:none"'; ?>>
 									<?php echo esc_html( $ism_m['note'] ); ?>
+									<br>
+									<?php
+									printf(
+										/* translators: 1: input price, 2: output price */
+										esc_html__( 'Billed at $%1$s per million tokens you send and $%2$s per million it writes back. A typical image sends about 700 and gets back about 150.', 'image-size-manager' ),
+										esc_html( number_format( $ism_m['in'], 2 ) ),
+										esc_html( number_format( $ism_m['out'], 2 ) )
+									);
+									?>
 								</p>
 							<?php endforeach; ?>
 						</td>
@@ -614,9 +620,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 				<p class="description">
 					<?php esc_html_e( 'Sorts every image into what can be generated for, what should be reviewed by hand, and what appears on no page. Read-only; no API key needed.', 'image-size-manager' ); ?>
 				</p>
+				<p class="description ism-seo-scan-state"></p>
 				<div class="ism-regen-controls">
 					<button type="button" class="button button-primary" id="ism-seo-scan-start">
-						<?php esc_html_e( 'Scan library', 'image-size-manager' ); ?>
+						<?php esc_html_e( 'Load chart', 'image-size-manager' ); ?>
+					</button>
+					<button type="button" class="button" id="ism-seo-rescan">
+						<?php esc_html_e( 'Rescan library', 'image-size-manager' ); ?>
 					</button>
 				</div>
 				<div class="ism-progress-wrap" id="ism-seo-scan-progress" style="display:none">
@@ -639,6 +649,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 						<select id="ism-seo-filter">
 							<option value="ready"><?php esc_html_e( 'Ready to generate', 'image-size-manager' ); ?></option>
 							<option value="noalt"><?php esc_html_e( 'Ready, missing alt text', 'image-size-manager' ); ?></option>
+							<option value="missing"><?php esc_html_e( 'Missing any field', 'image-size-manager' ); ?></option>
+							<option value="missing_title"><?php esc_html_e( 'Missing title', 'image-size-manager' ); ?></option>
+							<option value="missing_desc"><?php esc_html_e( 'Missing description', 'image-size-manager' ); ?></option>
 							<option value="dupes"><?php esc_html_e( 'Duplicates only', 'image-size-manager' ); ?></option>
 							<option value="skipped"><?php esc_html_e( 'Decorative / unsupported', 'image-size-manager' ); ?></option>
 							<option value="unused"><?php esc_html_e( 'Not found on any page', 'image-size-manager' ); ?></option>
@@ -648,10 +661,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 					<input type="search" id="ism-seo-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename or page…', 'image-size-manager' ); ?>" />
 					<button type="button" class="button" id="ism-seo-check-all"><?php esc_html_e( 'Tick all shown', 'image-size-manager' ); ?></button>
 					<button type="button" class="button" id="ism-seo-check-none"><?php esc_html_e( 'Untick all', 'image-size-manager' ); ?></button>
+					<label class="ism-seo-show-reviewed">
+						<input type="checkbox" id="ism-seo-show-reviewed" />
+						<?php esc_html_e( 'Show reviewed', 'image-size-manager' ); ?>
+					</label>
 					<span class="ism-seo-chart-count"></span>
 				</div>
 
+				<div class="ism-seo-pager ism-seo-pager-top"></div>
 				<div id="ism-seo-chart"></div>
+				<div class="ism-seo-pager ism-seo-pager-bottom"></div>
 			</div>
 
 			<!-- Generate ────────────────────────────────────────────────── -->
