@@ -2098,4 +2098,306 @@
 		$( '.ism-model-note' ).hide().filter( '[data-model="' + m + '"]' ).show();
 	} );
 
+	// ── Broken images ───────────────────────────────────────────────────────
+	//
+	// Detection and suggestion only. There is no repair path in this build:
+	// repointing has to rewrite Elementor JSON and ACF meta correctly, which is
+	// being built and tested separately. Choosing a replacement here records
+	// the decision — the slow, human part — ready for that step.
+
+	var brokenRefs    = [];
+	var brokenChoices = {};   // ref key -> { id, filename, thumb }
+	var brokenSuggest = {};   // filename -> suggestions
+	var brokenPage    = 1;
+	var BROKEN_PER_PAGE = 25;
+
+	function brokenRun( offset ) {
+		seoPost( 'ism_broken_batch', { offset: offset }, function ( res ) {
+			if ( ! res.success ) {
+				$( '#ism-broken-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
+				$( '#ism-broken-scan, #ism-broken-rescan' ).prop( 'disabled', false );
+				return;
+			}
+			var d = res.data;
+			brokenRefs = brokenRefs.concat( d.refs );
+			$( '#ism-broken-bar' ).css( 'width', ( d.total ? Math.round( ( d.offset / d.total ) * 100 ) : 100 ) + '%' );
+			$( '#ism-broken-status' ).text( d.offset + ' / ' + d.total + ' posts checked · ' + brokenRefs.length + ' broken references' );
+
+			if ( d.done ) {
+				$( '#ism-broken-status' ).text( 'Scan complete — ' + d.total + ' posts checked.' );
+				$( '#ism-broken-scan, #ism-broken-rescan' ).prop( 'disabled', false );
+				brokenPage = 1;
+				brokenRenderSummary();
+				brokenRenderList();
+				return;
+			}
+			setTimeout( function () { brokenRun( d.offset ); }, 40 );
+		}, function () {
+			$( '#ism-broken-status' ).text( 'Request failed. Reload and try again.' );
+			$( '#ism-broken-scan, #ism-broken-rescan' ).prop( 'disabled', false );
+		} );
+	}
+
+	function brokenStart( force ) {
+		brokenRefs = [];
+		$( '#ism-broken-scan, #ism-broken-rescan' ).prop( 'disabled', true );
+		$( '#ism-broken-progress' ).show();
+		$( '#ism-broken-bar' ).css( 'width', '0%' );
+		$( '#ism-broken-status' ).text( force ? 'Rescanning…' : 'Loading…' );
+
+		seoPost( 'ism_broken_init', { force: force ? 1 : 0 }, function ( res ) {
+			if ( ! res.success ) {
+				$( '#ism-broken-status' ).text( 'Error: ' + ( res.data || 'unknown' ) );
+				$( '#ism-broken-scan, #ism-broken-rescan' ).prop( 'disabled', false );
+				return;
+			}
+
+			brokenChoices = {};
+			$.each( res.data.choices || {}, function ( k, v ) { brokenChoices[ k ] = { id: v }; } );
+
+			if ( res.data.cached ) {
+				brokenRefs = res.data.refs || [];
+				$( '.ism-broken-state' ).text( 'Using the scan from ' + res.data.scanned_ago + ' ago.' );
+				$( '#ism-broken-status' ).text( 'Loaded ' + brokenRefs.length + ' broken references.' );
+				$( '#ism-broken-bar' ).css( 'width', '100%' );
+				$( '#ism-broken-scan, #ism-broken-rescan' ).prop( 'disabled', false );
+				brokenPage = 1;
+				brokenRenderSummary();
+				brokenRenderList();
+				return;
+			}
+
+			$( '.ism-broken-state' ).text( 'No stored scan — checking every post now.' );
+			brokenRun( 0 );
+		} );
+	}
+
+	$( document ).on( 'click', '#ism-broken-scan', function () { brokenStart( false ); } );
+	$( document ).on( 'click', '#ism-broken-rescan', function () { brokenStart( true ); } );
+
+	function brokenRenderSummary() {
+		var stale = 0, missing = 0, unrec = 0, chosen = 0;
+		var posts = {};
+
+		brokenRefs.forEach( function ( r ) {
+			if ( r.type === 'stale_id' ) { stale++; } else { missing++; }
+			if ( ! r.recoverable ) { unrec++; }
+			if ( brokenChoices[ r.key ] ) { chosen++; }
+			posts[ r.post_id ] = true;
+		} );
+
+		$( '.ism-broken-summary' ).html(
+			'<ul class="ism-seo-stats">'
+			+ '<li><strong>' + brokenRefs.length + '</strong> broken references</li>'
+			+ '<li><strong>' + Object.keys( posts ).length + '</strong> pages affected</li>'
+			+ '<li><strong>' + stale + '</strong> deleted attachment</li>'
+			+ '<li><strong>' + missing + '</strong> file missing on disk</li>'
+			+ '<li><strong>' + unrec + '</strong> no filename to match on</li>'
+			+ ( chosen ? '<li class="ism-stat-open"><strong>' + chosen + '</strong> replacement chosen</li>' : '' )
+			+ '</ul>'
+		).show();
+
+		$( '#ism-broken-list-card' ).toggle( brokenRefs.length > 0 );
+	}
+
+	function brokenVisible() {
+		var filter = $( '#ism-broken-filter' ).val() || 'all';
+		var term   = ( $( '#ism-broken-search' ).val() || '' ).toLowerCase();
+
+		return brokenRefs.filter( function ( r ) {
+			if ( filter === 'stale_id'      && r.type !== 'stale_id' ) { return false; }
+			if ( filter === 'missing_file'  && r.type !== 'missing_file' ) { return false; }
+			if ( filter === 'recoverable'   && ! r.recoverable ) { return false; }
+			if ( filter === 'unrecoverable' && r.recoverable ) { return false; }
+			if ( filter === 'chosen'        && ! brokenChoices[ r.key ] ) { return false; }
+
+			if ( term ) {
+				var hay = ( r.filename + ' ' + r.post_title + ' ' + r.field + ' ' + r.ref ).toLowerCase();
+				if ( hay.indexOf( term ) === -1 ) { return false; }
+			}
+			return true;
+		} );
+	}
+
+	function brokenSourceLabel( r ) {
+		if ( r.source === 'elementor' ) { return 'Elementor'; }
+		if ( r.source === 'acf' )       { return 'Custom field'; }
+		if ( r.source === 'featured' )  { return 'Featured image'; }
+		if ( r.source === 'content' )   { return 'Post content'; }
+		return r.source;
+	}
+
+	function brokenRowHtml( r ) {
+		var chosen = brokenChoices[ r.key ];
+
+		var what = r.type === 'stale_id'
+			? '<span class="ism-badge ism-badge-failed">attachment #' + esc( r.ref ) + ' deleted</span>'
+			: '<span class="ism-badge ism-badge-noalt">file missing</span>';
+
+		var name = r.recoverable
+			? '<code>' + esc( r.filename ) + '</code>'
+			: '<em class="ism-broken-unknown">filename not recoverable — this reference stores only an ID</em>';
+
+		var chosenHtml = chosen
+			? '<div class="ism-broken-chosen">'
+				+ ( chosen.thumb ? '<img src="' + esc( chosen.thumb ) + '" alt="" width="36" height="36" />' : '' )
+				+ '<span>Chosen replacement: <strong>#' + chosen.id + '</strong>'
+				+ ( chosen.filename ? ' ' + esc( chosen.filename ) : '' ) + '</span>'
+				+ '<button type="button" class="button button-small ism-broken-clear" data-key="' + esc( r.key ) + '">Clear</button>'
+				+ '</div>'
+			: '';
+
+		return '<div class="ism-broken-row" data-key="' + esc( r.key ) + '">'
+			+ '<div class="ism-broken-head">'
+			+ '<div class="ism-broken-what">' + what + ' ' + name + '</div>'
+			+ '<div class="description">'
+			+ esc( brokenSourceLabel( r ) ) + ' · <code>' + esc( r.field ) + '</code> · on '
+			+ '<a href="' + esc( ismData.adminUrl + 'post.php?post=' + r.post_id + '&action=edit' ) + '" target="_blank">'
+			+ esc( r.post_title ) + '</a> <span class="description">(' + esc( r.post_type ) + ')</span>'
+			+ '</div>'
+			+ ( r.url ? '<div class="ism-broken-url" title="' + esc( r.url ) + '">' + esc( r.url ) + '</div>' : '' )
+			+ '</div>'
+			+ chosenHtml
+			+ '<div class="ism-broken-actions">'
+			+ ( r.recoverable
+				? '<button type="button" class="button button-small ism-broken-find" data-key="' + esc( r.key ) + '" data-filename="' + esc( r.filename ) + '">Suggest matches</button> '
+				: '' )
+			+ '<button type="button" class="button button-small ism-broken-pick" data-key="' + esc( r.key ) + '">Choose from media library…</button>'
+			+ '</div>'
+			+ '<div class="ism-broken-suggestions"></div>'
+			+ '</div>';
+	}
+
+	function brokenRenderList() {
+		var vis   = brokenVisible();
+		var pages = Math.max( 1, Math.ceil( vis.length / BROKEN_PER_PAGE ) );
+		if ( brokenPage > pages ) { brokenPage = pages; }
+
+		var start = ( brokenPage - 1 ) * BROKEN_PER_PAGE;
+		var slice = vis.slice( start, start + BROKEN_PER_PAGE );
+
+		$( '.ism-broken-count' ).text( vis.length + ' shown of ' + brokenRefs.length );
+		$( '#ism-broken-list' ).html( slice.length
+			? slice.map( brokenRowHtml ).join( '' )
+			: '<p class="description">Nothing matches this filter.</p>' );
+
+		if ( pages < 2 ) {
+			$( '.ism-broken-pager-top, .ism-broken-pager-bottom' ).empty();
+			return;
+		}
+
+		var html = '<span class="ism-seo-pager-info">' + ( start + 1 ) + '–' + ( start + slice.length ) + ' of ' + vis.length + '</span>'
+			+ '<button type="button" class="button ism-broken-prev"' + ( brokenPage === 1 ? ' disabled' : '' ) + '>‹ Prev</button>'
+			+ '<span class="ism-seo-pager-pos">Page ' + brokenPage + ' of ' + pages + '</span>'
+			+ '<button type="button" class="button ism-broken-next"' + ( brokenPage === pages ? ' disabled' : '' ) + '>Next ›</button>';
+		$( '.ism-broken-pager-top, .ism-broken-pager-bottom' ).html( html );
+	}
+
+	$( document ).on( 'change', '#ism-broken-filter', function () { brokenPage = 1; brokenRenderList(); } );
+	$( document ).on( 'input', '#ism-broken-search', function () {
+		clearTimeout( window.ismBrokenTimer );
+		window.ismBrokenTimer = setTimeout( function () { brokenPage = 1; brokenRenderList(); }, 250 );
+	} );
+	$( document ).on( 'click', '.ism-broken-prev', function () { brokenPage--; brokenRenderList(); } );
+	$( document ).on( 'click', '.ism-broken-next', function () { brokenPage++; brokenRenderList(); } );
+
+	// ── Suggestions ─────────────────────────────────────────────────────────
+
+	function brokenShowSuggestions( $row, key, list ) {
+		if ( ! list.length ) {
+			$row.find( '.ism-broken-suggestions' ).html(
+				'<p class="description">No candidate in the library resembles this filename. Use the media library picker.</p>'
+			);
+			return;
+		}
+
+		$row.find( '.ism-broken-suggestions' ).html(
+			'<p class="description">Ranked by filename similarity only — the picture is not compared. Check before choosing.</p>'
+			+ '<div class="ism-broken-cands">' + list.map( function ( c ) {
+				return '<div class="ism-broken-cand">'
+					+ ( c.thumb ? '<img src="' + esc( c.thumb ) + '" alt="" width="48" height="48" loading="lazy" />' : '<span class="ism-seo-nothumb"></span>' )
+					+ '<div class="ism-broken-cand-meta">'
+					+ '<span class="ism-broken-score">' + c.percent + '%</span> '
+					+ ( c.edit_url ? '<a href="' + esc( c.edit_url ) + '" target="_blank">' + esc( c.filename ) + '</a>' : esc( c.filename ) )
+					+ '<div class="description">#' + c.id + ' · ' + esc( c.reason ) + '</div>'
+					+ '</div>'
+					+ '<button type="button" class="button button-small ism-broken-choose" data-key="' + esc( key ) + '" data-id="' + c.id + '">Choose</button>'
+					+ '</div>';
+			} ).join( '' ) + '</div>'
+		);
+	}
+
+	$( document ).on( 'click', '.ism-broken-find', function () {
+		var $btn = $( this );
+		var key  = String( $btn.data( 'key' ) );
+		var file = String( $btn.data( 'filename' ) );
+		var $row = $btn.closest( '.ism-broken-row' );
+
+		if ( brokenSuggest[ file ] ) {
+			brokenShowSuggestions( $row, key, brokenSuggest[ file ] );
+			return;
+		}
+
+		$btn.prop( 'disabled', true ).text( 'Matching…' );
+		seoPost( 'ism_broken_suggest', { filename: file }, function ( res ) {
+			$btn.prop( 'disabled', false ).text( 'Suggest matches' );
+			if ( ! res.success ) { return; }
+			brokenSuggest[ file ] = res.data.suggestions;
+			brokenShowSuggestions( $row, key, res.data.suggestions );
+		}, function () {
+			$btn.prop( 'disabled', false ).text( 'Suggest matches' );
+		} );
+	} );
+
+	function brokenSaveChoice( key, id ) {
+		seoPost( 'ism_broken_choose', { key: key, attachment_id: id }, function ( res ) {
+			if ( ! res.success ) { return; }
+			if ( id ) {
+				brokenChoices[ key ] = { id: res.data.attachment_id, filename: res.data.filename, thumb: res.data.thumb };
+			} else {
+				delete brokenChoices[ key ];
+			}
+			brokenRenderSummary();
+			brokenRenderList();
+		} );
+	}
+
+	$( document ).on( 'click', '.ism-broken-choose', function () {
+		brokenSaveChoice( String( $( this ).data( 'key' ) ), parseInt( $( this ).data( 'id' ), 10 ) );
+	} );
+
+	$( document ).on( 'click', '.ism-broken-clear', function () {
+		brokenSaveChoice( String( $( this ).data( 'key' ) ), 0 );
+	} );
+
+	// Core's media modal, so any attachment can be picked when the automatic
+	// match is wrong or there is nothing to match on.
+	var brokenFrame = null;
+
+	$( document ).on( 'click', '.ism-broken-pick', function () {
+		var key = String( $( this ).data( 'key' ) );
+
+		if ( ! window.wp || ! window.wp.media ) {
+			window.alert( 'The WordPress media library could not be opened on this screen.' );
+			return;
+		}
+
+		if ( ! brokenFrame ) {
+			brokenFrame = wp.media( {
+				title: 'Choose the replacement image',
+				library: { type: 'image' },
+				button: { text: 'Use this image' },
+				multiple: false
+			} );
+
+			brokenFrame.on( 'select', function () {
+				var a = brokenFrame.state().get( 'selection' ).first().toJSON();
+				brokenSaveChoice( brokenFrame.ismKey, a.id );
+			} );
+		}
+
+		brokenFrame.ismKey = key;
+		brokenFrame.open();
+	} );
+
 } )( jQuery );

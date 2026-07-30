@@ -888,3 +888,74 @@
 	border-left: 3px solid #2271b1;
 	font-size: 13px;
 }
+
+/* ── Broken images ──────────────────────────────────────────────────────── */
+
+.ism-broken-scope {
+	background: #f6f7f7;
+	border-left: 3px solid #2271b1;
+	padding: 10px 14px;
+	margin: 12px 0 0;
+	font-size: 13px;
+	max-width: 80ch;
+}
+.ism-broken-state { margin-bottom: 4px; }
+.ism-broken-summary { margin-top: 14px; }
+.ism-broken-count { margin-left: auto; color: #50575e; }
+
+.ism-broken-row {
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 12px 14px;
+	margin-bottom: 10px;
+	background: #fff;
+}
+.ism-broken-head .ism-broken-what { margin-bottom: 4px; }
+.ism-broken-what code { font-size: 13px; }
+.ism-broken-unknown { color: #8a5700; }
+.ism-broken-url {
+	font-size: 11px;
+	color: #787c82;
+	margin-top: 3px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+.ism-broken-actions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+.ism-broken-chosen {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 8px;
+	padding: 8px 10px;
+	background: #f0f7f1;
+	border: 1px solid #a7d3ab;
+	border-radius: 3px;
+	font-size: 13px;
+}
+.ism-broken-chosen img { border-radius: 3px; object-fit: cover; }
+.ism-broken-chosen button { margin-left: auto; }
+
+.ism-broken-suggestions:empty { display: none; }
+.ism-broken-suggestions { margin-top: 10px; }
+.ism-broken-cands { display: grid; gap: 6px; }
+.ism-broken-cand {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 8px;
+	border: 1px solid #e0e0e1;
+	border-radius: 3px;
+	background: #fbfbfc;
+}
+.ism-broken-cand img { border-radius: 3px; object-fit: cover; flex: none; }
+.ism-broken-cand-meta { flex: 1; min-width: 0; font-size: 13px; }
+.ism-broken-cand button { flex: none; }
+.ism-broken-score {
+	display: inline-block;
+	min-width: 42px;
+	font-weight: 700;
+	color: #1d7e2d;
+}

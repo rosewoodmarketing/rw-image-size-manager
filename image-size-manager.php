@@ -33,6 +33,7 @@ require_once ISM_PLUGIN_DIR . 'includes/image-source.php';
 require_once ISM_PLUGIN_DIR . 'includes/ai-client.php';
 require_once ISM_PLUGIN_DIR . 'includes/file-hash.php';
 require_once ISM_PLUGIN_DIR . 'includes/seo-ajax.php';
+require_once ISM_PLUGIN_DIR . 'includes/broken-images.php';
 
 if ( is_admin() ) {
 	new ISM_GitHub_Updater( __FILE__, ISM_GITHUB_USER, ISM_GITHUB_REPO );
@@ -101,6 +102,14 @@ add_action( 'wp_ajax_ism_seo_review',     'ism_ajax_seo_review' );
 add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
 add_action( 'wp_ajax_ism_seo_save_advanced', 'ism_ajax_seo_save_advanced' );
 add_action( 'wp_ajax_ism_seo_duplicates', 'ism_ajax_seo_duplicates' );
+
+// AJAX: Broken Images tab — detection and match suggestion. No repoint path
+// exists yet, deliberately: rewriting Elementor JSON and ACF meta correctly is
+// its own problem and is being built separately.
+add_action( 'wp_ajax_ism_broken_init',    'ism_ajax_broken_init' );
+add_action( 'wp_ajax_ism_broken_batch',   'ism_ajax_broken_batch' );
+add_action( 'wp_ajax_ism_broken_suggest', 'ism_ajax_broken_suggest' );
+add_action( 'wp_ajax_ism_broken_choose',  'ism_ajax_broken_choose' );
 
 // AJAX: usage index build (Image SEO tab depends on it)
 add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );
@@ -787,6 +796,9 @@ function ism_enqueue_assets( string $hook ): void {
 		[],
 		ISM_VERSION
 	);
+	// The Broken Images tab offers the core media modal as a manual picker.
+	wp_enqueue_media();
+
 	wp_enqueue_script(
 		'ism-admin',
 		ISM_PLUGIN_URL . 'admin/admin.js',
@@ -802,6 +814,7 @@ function ism_enqueue_assets( string $hook ): void {
 		'maxUploadWidth' => (int) ism_get_settings()['max_upload_width'],
 		'maxUploadHeight'=> (int) ism_get_settings()['max_upload_height'],
 		'sizeUsageNonce' => wp_create_nonce( 'ism_size_usage_scan' ),
+		'adminUrl'       => admin_url(),
 		'seoNonce'       => wp_create_nonce( 'ism_seo' ),
 		'usageIndexNonce'=> wp_create_nonce( 'ism_usage_index' ),
 		// Deliberately absent: the API key. It is never sent to the browser.

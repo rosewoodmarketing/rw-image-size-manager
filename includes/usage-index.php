@@ -543,7 +543,7 @@ function ism_usage_attachment_maps(): array {
  * @param array              $elements Elements tree or settings subtree.
  * @param array<int,bool>   &$found    Collected attachment IDs, keyed by ID.
  */
-function ism_usage_walk_elementor( array $elements, array &$found ): void {
+function ism_usage_walk_elementor( array $elements, array &$found, array &$urls = [] ): void {
 	foreach ( $elements as $key => $value ) {
 		if ( ! is_array( $value ) ) {
 			continue;
@@ -554,11 +554,18 @@ function ism_usage_walk_elementor( array $elements, array &$found ): void {
 			$id = $value['id'];
 			if ( is_numeric( $id ) && (int) $id > 0 ) {
 				$found[ (int) $id ] = true;
+
+				// The URL is kept alongside the ID because it is the only thing
+				// that survives the attachment being deleted. Once the post is
+				// gone there is no _wp_attached_file to look the filename up
+				// from, so a stale Elementor reference is only recoverable at
+				// all because Elementor stored both.
+				$urls[ (int) $id ] = (string) $value['url'];
 			}
 		}
 
 		// Recurse into everything: elements, settings, gallery arrays, repeaters.
-		ism_usage_walk_elementor( $value, $found );
+		ism_usage_walk_elementor( $value, $found, $urls );
 	}
 }
 

@@ -44,6 +44,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<button type="button" class="ism-tab" data-target="ism-panel-seo">
 				<?php esc_html_e( 'Image SEO', 'image-size-manager' ); ?>
 			</button>
+			<button type="button" class="ism-tab" data-target="ism-panel-broken">
+				<?php esc_html_e( 'Broken Images', 'image-size-manager' ); ?>
+			</button>
 			<button type="button" class="ism-tab ism-tab-advanced" data-target="ism-panel-advanced">
 				<?php esc_html_e( 'Advanced', 'image-size-manager' ); ?>
 			</button>
@@ -846,6 +849,58 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 
 		</div><!-- /ism-panel-seo -->
+
+		<!-- ═══════════════════════════════════════════════════════════════════
+		     PANEL – BROKEN IMAGES
+		     ══════════════════════════════════════════════════════════════════ -->
+		<div id="ism-panel-broken" class="ism-panel" hidden>
+
+			<div class="ism-card">
+				<h2><?php esc_html_e( 'Broken Images', 'image-size-manager' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'References that point at an image which is no longer there. Two kinds: a reference to an attachment that has been deleted, and a reference to a file that is missing from disk. WordPress reports neither — the page just renders a gap.', 'image-size-manager' ); ?>
+				</p>
+				<p class="ism-broken-scope">
+					<?php esc_html_e( 'This tab finds broken references and suggests replacements. It does not repair anything yet — repointing has to rewrite Elementor JSON and ACF fields correctly, and that is being built and tested separately. Picking a replacement here records the decision so the repair step can use it later.', 'image-size-manager' ); ?>
+				</p>
+			</div>
+
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<p class="description ism-broken-state"></p>
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-broken-scan"><?php esc_html_e( 'Scan for broken images', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-broken-rescan"><?php esc_html_e( 'Rescan', 'image-size-manager' ); ?></button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-broken-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-broken-bar"></div></div>
+					<p class="ism-progress-status" id="ism-broken-status"></p>
+				</div>
+				<div class="ism-broken-summary" style="display:none"></div>
+			</div>
+
+			<div class="ism-card" id="ism-broken-list-card" style="margin-top:18px; display:none">
+				<div class="ism-seo-chart-toolbar">
+					<label>
+						<?php esc_html_e( 'Show', 'image-size-manager' ); ?>
+						<select id="ism-broken-filter">
+							<option value="all"><?php esc_html_e( 'Everything', 'image-size-manager' ); ?></option>
+							<option value="stale_id"><?php esc_html_e( 'Deleted attachment', 'image-size-manager' ); ?></option>
+							<option value="missing_file"><?php esc_html_e( 'File missing from disk', 'image-size-manager' ); ?></option>
+							<option value="recoverable"><?php esc_html_e( 'Filename recoverable', 'image-size-manager' ); ?></option>
+							<option value="unrecoverable"><?php esc_html_e( 'No filename — needs manual pick', 'image-size-manager' ); ?></option>
+							<option value="chosen"><?php esc_html_e( 'Replacement chosen', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<input type="search" id="ism-broken-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename, page or field…', 'image-size-manager' ); ?>" />
+					<span class="ism-broken-count"></span>
+				</div>
+
+				<div class="ism-seo-pager ism-broken-pager-top"></div>
+				<div id="ism-broken-list"></div>
+				<div class="ism-seo-pager ism-broken-pager-bottom"></div>
+			</div>
+
+		</div><!-- /ism-panel-broken -->
 
 		<!-- ═══════════════════════════════════════════════════════════════════
 		     PANEL 5 – ADVANCED (BULK TOOLS)
