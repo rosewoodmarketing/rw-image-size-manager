@@ -1225,6 +1225,31 @@
 		return !! ( p && ! p.error );
 	}
 
+	// Anything staged and not yet written: a usable proposal, or fields typed
+	// into a row by hand. Kept separate from seoHasOpenProposal(), which is
+	// specifically about AI proposals and drives the row badge and the summary
+	// counter. This is what "unapplied changes" means, so the count in the
+	// review card and the filter that shows them have to agree on it.
+	function seoHasUnapplied( g ) {
+		return seoHasOpenProposal( g ) || seoEditDiffers( g );
+	}
+
+	// An edit record is created the moment a field receives input, seeded with
+	// what is already there — so its mere existence does not mean anything
+	// changed. Typing a character and deleting it again would otherwise leave
+	// the row counted as pending forever.
+	function seoEditDiffers( g ) {
+		var e = seoEdits[ g.key ];
+		if ( ! e ) { return false; }
+
+		var cur = g.rep.current || {};
+		var fields = [ 'title', 'alt_text', 'description' ];
+		for ( var i = 0; i < fields.length; i++ ) {
+			if ( ( e[ fields[ i ] ] || '' ) !== ( cur[ fields[ i ] ] || '' ) ) { return true; }
+		}
+		return false;
+	}
+
 	// Mirrors the server's ism_seo_row() so the two agree about what "missing"
 	// means. Kept here as well because after an apply the browser knows what it
 	// wrote and should not need a rescan to reflect it.
@@ -1322,7 +1347,7 @@
 			if ( review === 'unreviewed' && g.reviewed ) { return false; }
 			if ( review === 'reviewed'   && ! g.reviewed ) { return false; }
 
-			if ( proposal === 'proposals' && ! seoHasOpenProposal( g ) ) { return false; }
+			if ( proposal === 'proposals' && ! seoHasUnapplied( g ) ) { return false; }
 
 			// What is actually empty on the image today. Title is deliberately
 			// not offered: WordPress fills one in from the filename on every
@@ -1604,6 +1629,11 @@
 		if ( ! g ) { return; }
 		if ( ! seoEdits[ k ] ) { seoEdits[ k ] = seoGroupValues( g ); }
 		seoEdits[ k ][ $f.data( 'field' ) ] = $f.val();
+
+		// Typing is a staged change, so the count above has to move with it.
+		// Without this the card kept reporting whatever the last generate run
+		// produced while the filter it points at showed more rows than that.
+		seoRenderReview();
 	} );
 
 	function seoGroupByKey( key ) {
@@ -1787,10 +1817,7 @@
 	// ── Review / apply ──────────────────────────────────────────────────────
 
 	function seoRenderReview() {
-		var pending = seoGroups.filter( function ( g ) {
-			var p = seoGroupProposal( g );
-			return ( p && ! p.error ) || seoEdits[ g.key ];
-		} );
+		var pending = seoGroups.filter( seoHasUnapplied );
 		$( '#ism-seo-review-card' ).toggle( pending.length > 0 );
 		$( '#ism-seo-review-list' ).html( pending.length
 			? '<p class="description">' + pending.length + ' image(s) have unapplied changes. '
@@ -1800,7 +1827,14 @@
 	}
 
 	$( document ).on( 'click', '.ism-seo-goto-proposals', function () {
-		$( '#ism-seo-filter' ).val( 'proposals' );
+		// Every filter that could hide a pending row is cleared, not just the
+		// proposal one. A staged row can be decorative (overridden), already
+		// reviewed, or have nothing missing, and any of those three would keep
+		// it out of view while the card above still counted it.
+		$( '#ism-seo-filter' ).val( 'all' );
+		$( '#ism-seo-review-filter' ).val( 'all' );
+		$( '#ism-seo-metadata-filter' ).val( 'all' );
+		$( '#ism-seo-proposal-filter' ).val( 'proposals' );
 		$( '#ism-seo-search' ).val( '' );
 		seoPage = 1;
 		seoRenderChart();
