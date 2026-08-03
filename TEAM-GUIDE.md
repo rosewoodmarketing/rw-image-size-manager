@@ -73,9 +73,15 @@ featured image, and which fields are currently empty.
 
 ### 4. Generate a small batch first — 5 min
 
-Select 15–20 rows, then *Step 3 → Generate*. **Read the output before scaling
-up.** The cost estimate above the button tells you what a run will cost before
-you commit.
+Two ways to choose what runs. Tick rows in the chart, or use **the first N
+images without a proposal** — which draws from the filtered view, so narrow
+the chart to what you want first and the run follows it. The count beside it
+tells you how many that filter actually has left. **Read the output before
+scaling up.** The cost estimate above the button prices the run before you
+commit.
+
+If the filter includes decorative or unreferenced images, generating asks
+first — those are normally left alone.
 
 **Tick which fields you want** beside the Generate button. Title and Alt text
 are on by default; Description is off. An unticked field is not requested from

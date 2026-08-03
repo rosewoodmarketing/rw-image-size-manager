@@ -1753,16 +1753,14 @@
 			queue = seoGroups.filter( function ( g ) { return seoChecked[ g.key ]; } );
 		} else {
 			var limit = Math.max( 1, parseInt( $( '#ism-seo-limit' ).val(), 10 ) || 20 );
-			queue = seoGroups.filter( function ( g ) {
-				return g.group === 'ready' && ! seoGroupProposal( g );
-			} ).slice( 0, limit );
+			queue = seoUnproposedVisible().slice( 0, limit );
 		}
 
 		if ( ! queue.length ) {
 			$( '#ism-seo-generate-progress' ).show();
 			$( '#ism-seo-generate-status' ).text( mode === 'selected'
 				? 'Nothing ticked in the chart.'
-				: 'Every ready image already has a proposal.' );
+				: 'Nothing left to generate in the current filter — every image it shows already has a proposal. Widen the filter to reach more.' );
 			return;
 		}
 
@@ -2153,18 +2151,33 @@
 		'claude-opus-4-8':  { in: 5, out: 25 }
 	};
 
+	// Candidates for the first-N mode: what the chart is currently showing,
+	// minus anything that already carries a proposal. Drawn from the filtered
+	// view rather than the whole library, so narrowing the chart to "missing
+	// alt text" and asking for the first 20 gets 20 of those, not the first 20
+	// of everything.
+	function seoUnproposedVisible() {
+		return seoVisibleGroups().filter( function ( g ) { return ! seoGroupProposal( g ); } );
+	}
+
 	function seoQueueSize() {
 		var mode = $( 'input[name="ism_seo_mode"]:checked' ).val();
 		if ( mode === 'selected' ) {
 			return seoGroups.filter( function ( g ) { return seoChecked[ g.key ]; } ).length;
 		}
 		var limit = Math.max( 1, parseInt( $( '#ism-seo-limit' ).val(), 10 ) || 20 );
-		return Math.min( limit, seoGroups.filter( function ( g ) {
-			return g.group === 'ready' && ! seoGroupProposal( g );
-		} ).length );
+		return Math.min( limit, seoUnproposedVisible().length );
 	}
 
 	function seoRenderEstimate() {
+		// Updated here rather than at each filter's own handler: every path that
+		// changes the visible set already ends in this function, so there is one
+		// place to keep in sync instead of five.
+		var avail = seoUnproposedVisible().length;
+		$( '.ism-seo-first-count' ).text(
+			avail ? '(' + avail + ' available in this filter)' : '(none left in this filter)'
+		);
+
 		var $box = $( '#ism-seo-estimate' );
 		if ( ! $box.length ) { return; }
 

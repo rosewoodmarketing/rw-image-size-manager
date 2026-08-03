@@ -819,10 +819,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 						<input type="radio" name="ism_seo_mode" value="first" />
 						<?php esc_html_e( 'The first', 'image-size-manager' ); ?>
 						<input type="number" id="ism-seo-limit" class="small-text" value="20" min="1" max="2000" />
-						<?php esc_html_e( 'ready images without a proposal yet', 'image-size-manager' ); ?>
+						<?php esc_html_e( 'images without a proposal, from the current filter', 'image-size-manager' ); ?>
+						<span class="ism-seo-first-count description"></span>
 					</label>
 					<span class="description" style="display:block;margin-top:6px">
-						<?php esc_html_e( 'Start small on a new site and read the output before scaling up.', 'image-size-manager' ); ?>
+						<?php esc_html_e( 'Follows the filters and search above — narrow the chart to what you want, then generate that. Start small on a new site and read the output before scaling up.', 'image-size-manager' ); ?>
 					</span>
 				</p>
 
