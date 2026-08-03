@@ -1650,6 +1650,7 @@
 				image_data_url: dataUrl || '',
 				override_skip:  override ? 1 : 0,
 				weights:        seoWeights(),
+				fields:         seoFields(),
 				extra_prompt:   $( '#ism-ai-extra-prompt' ).val() || ''
 			}, function ( res ) {
 				if ( res.success ) {
@@ -1739,6 +1740,10 @@
 	$( document ).on( 'click', '#ism-seo-generate-start', function () {
 		if ( ! seoWeightsValid() ) {
 			window.alert( 'Source weights total ' + seoWeightTotal() + '%. They must total 100% before generating.' );
+			return;
+		}
+		if ( ! seoFieldsValid() ) {
+			window.alert( 'No fields are ticked, so there is nothing to generate. Tick at least one of Title, Alt text or Description.' );
 			return;
 		}
 		var mode  = $( 'input[name="ism_seo_mode"]:checked' ).val();
@@ -2037,6 +2042,22 @@
 		return t;
 	}
 
+	// Which fields a run writes. Read from the DOM every time rather than kept
+	// in a variable, so the boxes are the single source of truth and a change
+	// takes effect on the next image of a run already in progress.
+	function seoFields() {
+		var f = [];
+		$( '.ism-seo-genfield:checked' ).each( function () { f.push( $( this ).val() ); } );
+		return f;
+	}
+
+	function seoFieldsValid() {
+		return seoFields().length > 0;
+	}
+
+	// The label a field is shown under, for messages about it.
+	var SEO_FIELD_LABELS = { title: 'Title', alt_text: 'Alt text', description: 'Description' };
+
 	function seoWeightsValid() {
 		return seoWeightTotal() === 100;
 	}
@@ -2054,9 +2075,17 @@
 
 		// Generation is blocked rather than quietly rescaled, so a mistake is
 		// visible before it costs anything.
-		$( '#ism-seo-generate-start' ).prop( 'disabled', bad || ! seoHasKey );
+		seoSyncGenerateEnabled();
 
 		seoRenderEstimate();
+	}
+
+	// One gate for the Generate button. Weights and fields are checked by
+	// separate handlers, and without a single place to decide, whichever ran
+	// last would re-enable the button over the other's objection.
+	function seoSyncGenerateEnabled() {
+		var blocked = ! seoHasKey || ! seoWeightsValid() || ! seoFieldsValid();
+		$( '#ism-seo-generate-start' ).prop( 'disabled', blocked );
 	}
 
 	$( document ).on( 'click', '#ism-advanced-toggle', function () {
@@ -2146,8 +2175,11 @@
 		var extra  = ( $( '#ism-ai-extra-prompt' ).val() || '' ).length;
 		var n      = seoQueueSize();
 
-		var input = 340;
-		var parts = [];
+		// The system prompt carries one spec paragraph per requested field, so
+		// dropping a field shrinks the input a little and the output a lot.
+		var fields = seoFields();
+		var input  = 300 + ( 40 * fields.length );
+		var parts  = [];
 		if ( w.image > 0 )    { input += 130; parts.push( 'image' ); }
 		if ( w.context > 0 )  { input += Math.ceil( chars / 4 ) + 60; parts.push( 'page context' ); }
 		if ( w.metadata > 0 ) { input += 60; parts.push( 'existing metadata' ); }
@@ -2157,7 +2189,12 @@
 		$.each( w, function ( k, v ) { if ( v > 0 ) { active++; } } );
 		if ( active > 1 ) { input += 25 * active; }
 
-		var output    = 150;
+		// Output is dominated by which fields are asked for. A description is
+		// two or three sentences; a title is a few words.
+		var OUT_TOKENS = { title: 20, alt_text: 40, description: 95 };
+		var output     = 12; // JSON scaffolding
+		$.each( fields, function ( i, f ) { output += OUT_TOKENS[ f ] || 40; } );
+
 		var perImage  = ( input * price.in / 1e6 ) + ( output * price.out / 1e6 );
 		var total     = perImage * n;
 
@@ -2167,16 +2204,25 @@
 			return;
 		}
 
+		if ( ! seoFieldsValid() ) {
+			$box.html( '<p class="ism-estimate-blocked">No fields ticked. '
+				+ 'Choose at least one field to generate.</p>' ).show();
+			return;
+		}
+
 		if ( ! n ) {
 			$box.html( '<p class="description">Nothing queued yet — tick images in the chart, or switch to the first-N option.</p>' ).show();
 			return;
 		}
 
+		var written = $.map( fields, function ( f ) { return SEO_FIELD_LABELS[ f ] || f; } );
+
 		$box.html(
 			'<div class="ism-estimate-head"><strong>' + n + '</strong> image' + ( n === 1 ? '' : 's' )
 			+ ' · approx <strong>$' + total.toFixed( total < 1 ? 3 : 2 ) + '</strong> total'
 			+ ' <span class="description">(about $' + perImage.toFixed( 4 ) + ' each)</span></div>'
-			+ '<p class="description">Sending ' + ( parts.length ? parts.join( ', ' ) : 'the instructions only' )
+			+ '<p class="description">Writing <strong>' + esc( written.join( ' + ' ) ) + '</strong>. '
+			+ 'Sending ' + ( parts.length ? parts.join( ', ' ) : 'the instructions only' )
 			+ ' — roughly ' + input.toLocaleString() + ' tokens in and ' + output + ' out per image, at '
 			+ esc( model ) + ' rates. Page text varies per image, so treat this as a ballpark, not a quote.</p>'
 			+ ( w.image === 0 ? '<p class="ism-estimate-warn">The image itself is weighted 0%, so nothing will actually look at the picture. Output will be inferred from text alone.</p>' : '' )
@@ -2184,6 +2230,25 @@
 	}
 
 	$( document ).on( 'change', 'input[name="ism_seo_mode"], #ism-seo-limit, #ism-ai-model, #ism-context-max-chars', seoRenderEstimate );
+
+	// Ticking a field takes effect immediately and is remembered, so the next
+	// visit starts where this one left off rather than reverting to the default.
+	$( document ).on( 'change', '.ism-seo-genfield', function () {
+		var $warn = $( '.ism-seo-genfields-warn' );
+
+		if ( ! seoFieldsValid() ) {
+			$warn.text( 'At least one field has to be ticked, or there is nothing to generate.' ).show();
+			seoSyncGenerateEnabled();
+			seoRenderEstimate();
+			return;
+		}
+
+		$warn.hide();
+		seoSyncGenerateEnabled();
+		seoRenderEstimate();
+
+		seoPost( 'ism_seo_save_fields', { fields: seoFields() }, function () {}, function () {} );
+	} );
 
 	// Model note follows the dropdown.
 	$( document ).on( 'change', '#ism-ai-model', function () {

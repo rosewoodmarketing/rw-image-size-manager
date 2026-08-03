@@ -62,6 +62,12 @@ Four independent filters:
 **Start with Metadata → Missing alt text.** That's the actual job. On the
 pilot site it was 484 of 720 usable images.
 
+Note that **Missing any field** counts an empty description as missing. With
+Description off by default, images whose only gap is a description never clear
+that filter — 34 of them on the pilot site. That is the filter reporting what
+is genuinely empty, not a bug; use *Missing alt text* as your working view and
+treat *Missing any field* as an inventory rather than a to-do list.
+
 Each row shows every page the image appears on, whether it's that page's
 featured image, and which fields are currently empty.
 
@@ -70,6 +76,20 @@ featured image, and which fields are currently empty.
 Select 15–20 rows, then *Step 3 → Generate*. **Read the output before scaling
 up.** The cost estimate above the button tells you what a run will cost before
 you commit.
+
+**Tick which fields you want** beside the Generate button. Title and Alt text
+are on by default; Description is off. An unticked field is not requested from
+the model at all — it is absent from the schema and from the prompt, so it
+costs nothing and the existing value on the image is left alone.
+
+Description is off by default because it is the attachment's `post_content`,
+which surfaces on the attachment page template most themes never link to and
+in a few lightbox plugins. On a typical site it is never rendered in the DOM.
+The field that *does* render under an image is the caption (`post_excerpt`),
+which is a separate field this plugin does not write. Turn Description on if
+your theme or a gallery plugin actually displays it — otherwise it is output
+tokens spent on something nobody sees. Measured on the pilot site, adding it
+costs about 55% more per image.
 
 Two things worth setting once, under **Advanced AI settings**:
 
@@ -91,8 +111,10 @@ first. An empty field is left alone rather than cleared.
   it still needs a decision.
 - Reviewed images drop out of the default view, so progress is visible.
 
-Writes: alt → `_wp_attachment_image_alt`, title → `post_title`,
-description → `post_content`.
+Writes only the fields you ticked: alt → `_wp_attachment_image_alt`,
+title → `post_title`, description → `post_content`. A field that was not
+generated is left exactly as it was — applying a Title + Alt text proposal
+never touches an existing description.
 
 ---
 
@@ -155,8 +177,10 @@ cheaper and better quality.
 override per image. Prose alt text on a decorative mark is a correctness bug,
 not a missing feature.
 
-**Cost.** Roughly **$0.14 per 100 images** on the default model. A 700-image
-library is about a dollar. Model and cost-per-100 are both shown in settings.
+**Cost.** Roughly **$0.11 per 100 images** on the default model with the
+default fields (Title + Alt text) — about **$0.17** if you also tick
+Description. A 700-image library is well under a dollar either way. Model and
+cost-per-100 are both shown in settings and update with your field choice.
 
 ---
 

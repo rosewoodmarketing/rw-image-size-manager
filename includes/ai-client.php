@@ -280,16 +280,27 @@ function ism_ai_models(): array {
  * @param string $model
  * @return float Dollars per 100 images.
  */
-function ism_ai_cost_per_100( string $model ): float {
+function ism_ai_cost_per_100( string $model, ?array $fields = null ): float {
 	$m = ism_ai_models()[ $model ] ?? null;
 	if ( ! $m ) {
 		return 0.0;
 	}
 
+	$fields = $fields === null ? ism_ai_get_fields() : ism_ai_sanitise_fields( $fields );
+
 	// Measured on the pilot site: a 300px image, a few hundred characters of
-	// page context, and the JSON that comes back.
-	$input_tokens  = 700;
-	$output_tokens = 150;
+	// page context, and the JSON that comes back. Output dominates the spread
+	// between configurations — a description is two or three sentences, a title
+	// is a few words — so it is counted per field rather than as one flat
+	// figure. Input barely moves, since the image and the page context are the
+	// bulk of it and neither depends on what is being written.
+	$per_field = [ 'title' => 20, 'alt_text' => 40, 'description' => 95 ];
+
+	$input_tokens  = 700 + ( 40 * count( $fields ) );
+	$output_tokens = 12;
+	foreach ( $fields as $field ) {
+		$output_tokens += $per_field[ $field ];
+	}
 
 	$per_image = ( $input_tokens * $m['in'] / 1000000 ) + ( $output_tokens * $m['out'] / 1000000 );
 
@@ -423,11 +434,13 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'override_skip'  => false,
 		'weights'        => null,
 		'extra_prompt'   => null,
+		'fields'         => null,
 	] );
 
 	$model   = (string) $args['model'];
 	$weights = $args['weights'] === null ? ism_ai_get_weights() : ism_ai_normalise_weights( (array) $args['weights'] );
 	$extra   = $args['extra_prompt'] === null ? ism_ai_get_extra_prompt() : trim( (string) $args['extra_prompt'] );
+	$fields  = $args['fields'] === null ? ism_ai_get_fields() : ism_ai_sanitise_fields( $args['fields'] );
 
 	// A source weighted at zero is not sent at all, so an empty instruction and
 	// a zeroed instruction weight mean the same thing.
@@ -492,7 +505,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 	$output_config = [
 		'format' => [
 			'type'   => 'json_schema',
-			'schema' => ism_ai_output_schema(),
+			'schema' => ism_ai_output_schema( $fields ),
 		],
 	];
 
@@ -513,7 +526,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'system'     => [
 			[
 				'type'          => 'text',
-				'text'          => ism_ai_system_prompt(),
+				'text'          => ism_ai_system_prompt( $fields ),
 				'cache_control' => [ 'type' => 'ephemeral' ],
 			],
 		],
@@ -571,7 +584,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 
 	return [
 		'attachment_id' => $attachment_id,
-		'result'        => ism_ai_parse_response( $text ),
+		'result'        => ism_ai_parse_response( $text, $fields ),
 		'raw'           => $text,
 		'prompt'        => $prompt,
 		'usage'         => ism_ai_usage( $response ),
@@ -665,6 +678,74 @@ function ism_ai_get_extra_prompt(): string {
 	return trim( (string) ( $settings['ai_extra_prompt'] ?? '' ) );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Which fields to generate
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The fields generation can produce, in the order they are written and shown.
+ *
+ * @return array<string,string> Field key => human label.
+ */
+function ism_ai_fields(): array {
+	return [
+		'title'       => 'Title',
+		'alt_text'    => 'Alt text',
+		'description' => 'Description',
+	];
+}
+
+/**
+ * What a run generates when nobody has said otherwise.
+ *
+ * Description is deliberately absent. It is the attachment's post_content,
+ * which surfaces on the attachment page template most themes never link to and
+ * in a handful of lightbox plugins — on a typical site it is never rendered in
+ * the DOM at all. The field that does render under an image is the caption
+ * (post_excerpt), which is a different field this plugin does not write. So
+ * generating descriptions by default spends output tokens on every image in
+ * the library to populate something most sites never display; anyone who does
+ * use it can tick the box.
+ *
+ * @return string[]
+ */
+function ism_ai_default_fields(): array {
+	return [ 'title', 'alt_text' ];
+}
+
+/**
+ * Reduce arbitrary input to a valid, canonically-ordered field list.
+ *
+ * Falls back to the default rather than returning nothing, because an empty
+ * list would mean a request that spends input tokens on an image and a page of
+ * context and asks for no output at all.
+ *
+ * @param mixed $fields
+ * @return string[]
+ */
+function ism_ai_sanitise_fields( $fields ): array {
+	$valid = array_keys( ism_ai_fields() );
+	$given = array_map( 'strval', (array) $fields );
+	$out   = array_values( array_intersect( $valid, $given ) );
+
+	return $out === [] ? ism_ai_default_fields() : $out;
+}
+
+/**
+ * The fields this site generates, unless a run overrides them.
+ *
+ * @return string[]
+ */
+function ism_ai_get_fields(): array {
+	$settings = ism_get_settings();
+
+	if ( ! isset( $settings['ai_fields'] ) ) {
+		return ism_ai_default_fields();
+	}
+
+	return ism_ai_sanitise_fields( $settings['ai_fields'] );
+}
+
 /**
  * Turn a weight set into an instruction about which source wins a disagreement.
  *
@@ -720,8 +801,33 @@ function ism_ai_render_weighting( array $weights ): string {
  *
  * @return string
  */
-function ism_ai_system_prompt(): string {
-	return <<<'PROMPT'
+function ism_ai_system_prompt( ?array $fields = null ): string {
+	$fields = $fields === null ? ism_ai_default_fields() : ism_ai_sanitise_fields( $fields );
+
+	$specs = [
+		'title' => '- title: a short human-readable name for the image in the media library.
+  Sentence case, no file extension, no dimensions, under about 60 characters.',
+
+		'alt_text' => '- alt_text: what a screen-reader user needs in order to understand why this
+  image is on the page. Describe what is actually visible, specifically and
+  concretely. Do not begin with "image of", "picture of", or "photo of" — a
+  screen reader already announces that it is an image. Do not stuff keywords.
+  Under about 125 characters.',
+
+		'description' => '- description: two or three sentences of additional detail for the media
+  library, covering what the image shows and how it relates to the page it
+  appears on.',
+	];
+
+	$wanted = [];
+	foreach ( $fields as $field ) {
+		$wanted[] = $specs[ $field ];
+	}
+
+	$count = count( $fields ) === 1 ? 'one field' : ( count( $fields ) === 2 ? 'two fields' : 'three fields' );
+	$list  = implode( "\n", $wanted );
+
+	$prompt = <<<PROMPT
 You write image metadata for a WordPress site, for accessibility and SEO.
 
 You are given one image and context describing the pages it appears on. Use
@@ -729,33 +835,39 @@ that context: the same photograph means something different on a product page
 than in a case study, and the page it lives on tells you which reading is
 right.
 
-Return three fields:
+Return exactly {$count}, and nothing else:
 
-- title: a short human-readable name for the image in the media library.
-  Sentence case, no file extension, no dimensions, under about 60 characters.
-- alt_text: what a screen-reader user needs in order to understand why this
-  image is on the page. Describe what is actually visible, specifically and
-  concretely. Do not begin with "image of", "picture of", or "photo of" — a
-  screen reader already announces that it is an image. Do not stuff keywords.
-  Under about 125 characters.
-- description: two or three sentences of additional detail for the media
-  library, covering what the image shows and how it relates to the page it
-  appears on.
+{$list}
+PROMPT;
 
+	// Only earns its place in the prompt when alt text is actually being
+	// written; it is guidance about one specific field, not general style.
+	if ( in_array( 'alt_text', $fields, true ) ) {
+		$prompt .= "\n\n" . <<<'PROMPT'
 When the image is a logo, brand mark, or icon, alt text should name the thing it
 stands for rather than describe how it looks. "Buckeye Metal Sales" tells a
 screen-reader user what they need; an inventory of the colours, shapes and
 layout of the mark does not. Judge for yourself which images this applies to.
 Everything else gets the descriptive treatment above.
+PROMPT;
+	}
 
+	if ( in_array( 'title', $fields, true ) ) {
+		$prompt .= "\n\n" . <<<'PROMPT'
 If the context includes a filename hint, use it as a hint only. Write a better
-and more specific title than the filename suggests — never copy it back. If the
-context says the image was not found on any page, describe only what you can
-actually see and do not invent a purpose for it.
+and more specific title than the filename suggests — never copy it back.
+PROMPT;
+	}
+
+	$prompt .= "\n\n" . <<<'PROMPT'
+If the context says the image was not found on any page, describe only what you
+can actually see and do not invent a purpose for it.
 
 Describe only what is visible in the image. Do not guess at brands, model
 numbers, locations, or people's names that the context does not establish.
 PROMPT;
+
+	return $prompt;
 }
 
 /**
@@ -763,15 +875,18 @@ PROMPT;
  *
  * @return array
  */
-function ism_ai_output_schema(): array {
+function ism_ai_output_schema( ?array $fields = null ): array {
+	$fields = $fields === null ? ism_ai_default_fields() : ism_ai_sanitise_fields( $fields );
+
+	$properties = [];
+	foreach ( $fields as $field ) {
+		$properties[ $field ] = [ 'type' => 'string' ];
+	}
+
 	return [
-		'type'       => 'object',
-		'properties' => [
-			'title'       => [ 'type' => 'string' ],
-			'alt_text'    => [ 'type' => 'string' ],
-			'description' => [ 'type' => 'string' ],
-		],
-		'required'             => [ 'title', 'alt_text', 'description' ],
+		'type'                 => 'object',
+		'properties'           => $properties,
+		'required'             => $fields,
 		'additionalProperties' => false,
 	];
 }
@@ -1017,7 +1132,9 @@ function ism_ai_response_text( array $decoded ): string {
  * @param string $text
  * @return array{title:string, alt_text:string, description:string}|null
  */
-function ism_ai_parse_response( string $text ): ?array {
+function ism_ai_parse_response( string $text, ?array $fields = null ): ?array {
+	$fields = $fields === null ? ism_ai_default_fields() : ism_ai_sanitise_fields( $fields );
+
 	$text = trim( $text );
 	if ( $text === '' ) {
 		return null;
@@ -1045,17 +1162,24 @@ function ism_ai_parse_response( string $text ): ?array {
 		return null;
 	}
 
-	foreach ( [ 'title', 'alt_text', 'description' ] as $field ) {
+	// Only the requested fields are required. A model that volunteers an extra
+	// one is not treated as a failure, but the extra is dropped rather than
+	// written — the run asked for a specific set and that is what it gets.
+	foreach ( $fields as $field ) {
 		if ( ! isset( $decoded[ $field ] ) || ! is_string( $decoded[ $field ] ) ) {
 			return null;
 		}
 	}
 
-	return [
-		'title'       => ism_ai_clean_field( $decoded['title'] ),
-		'alt_text'    => ism_ai_clean_field( $decoded['alt_text'] ),
-		'description' => ism_ai_clean_field( $decoded['description'] ),
-	];
+	// Every key is always present so callers, the stored proposal and the review
+	// table keep one stable shape. A field that was not generated is an empty
+	// string, which the apply path already treats as "leave this alone".
+	$out = [ 'title' => '', 'alt_text' => '', 'description' => '' ];
+	foreach ( $fields as $field ) {
+		$out[ $field ] = ism_ai_clean_field( $decoded[ $field ] );
+	}
+
+	return $out;
 }
 
 /**

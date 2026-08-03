@@ -103,6 +103,7 @@ add_action( 'wp_ajax_ism_seo_review',     'ism_ajax_seo_review' );
 add_action( 'wp_ajax_ism_seo_reject',     'ism_ajax_seo_reject' );
 add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
 add_action( 'wp_ajax_ism_seo_save_advanced', 'ism_ajax_seo_save_advanced' );
+add_action( 'wp_ajax_ism_seo_save_fields', 'ism_ajax_seo_save_fields' );
 add_action( 'wp_ajax_ism_seo_duplicates', 'ism_ajax_seo_duplicates' );
 
 // AJAX: Broken Images tab — detection and match suggestion. No repoint path

@@ -817,6 +817,33 @@
 .ism-seo-estimate p { margin: 6px 0 0; }
 .ism-estimate-warn { color: #8a5700; font-weight: 500; }
 .ism-estimate-blocked { color: #b32d2e; font-weight: 500; margin: 0; }
+
+/* ── Which fields a run writes ──────────────────────────────────────────── */
+
+.ism-seo-genfields {
+	margin: 14px 0 0;
+	padding: 10px 14px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+}
+.ism-seo-genfields-label {
+	font-weight: 600;
+	margin-right: 12px;
+}
+.ism-seo-genfield-toggle {
+	display: inline-block;
+	margin-right: 16px;
+	white-space: nowrap;
+}
+.ism-seo-genfields .ism-seo-genfields-note {
+	margin: 8px 0 0;
+}
+.ism-seo-genfields .ism-seo-genfields-warn {
+	margin: 8px 0 0;
+	color: #b32d2e;
+	font-weight: 500;
+}
 .ism-seo-stats .ism-stat-open strong { color: #1d7e2d; }
 
 /* ── Duplicate review (read-only) ───────────────────────────────────────── */

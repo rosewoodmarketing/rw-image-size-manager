@@ -826,6 +826,25 @@ if ( ! defined( 'ABSPATH' ) ) {
 					</span>
 				</p>
 
+				<?php $ism_gen_fields = ism_ai_get_fields(); ?>
+				<div class="ism-seo-genfields">
+					<span class="ism-seo-genfields-label"><?php esc_html_e( 'Generate which fields:', 'image-size-manager' ); ?></span>
+					<?php foreach ( ism_ai_fields() as $ism_field_key => $ism_field_label ) : ?>
+						<label class="ism-seo-genfield-toggle">
+							<input
+								type="checkbox"
+								class="ism-seo-genfield"
+								value="<?php echo esc_attr( $ism_field_key ); ?>"
+								<?php checked( in_array( $ism_field_key, $ism_gen_fields, true ) ); ?> />
+							<?php echo esc_html( $ism_field_label ); ?>
+						</label>
+					<?php endforeach; ?>
+					<p class="description ism-seo-genfields-note">
+						<?php esc_html_e( 'Unticked fields are not requested from the model at all, so they cost nothing and are left untouched on the image. Description is off by default — it is the attachment\'s post_content, which most themes never render on the front end.', 'image-size-manager' ); ?>
+					</p>
+					<p class="description ism-seo-genfields-warn" style="display:none"></p>
+				</div>
+
 				<div class="ism-seo-estimate" id="ism-seo-estimate"></div>
 
 				<div class="ism-regen-controls">

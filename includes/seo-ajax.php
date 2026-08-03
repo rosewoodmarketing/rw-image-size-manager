@@ -451,11 +451,18 @@ function ism_ajax_seo_generate(): void {
 		? sanitize_textarea_field( wp_unslash( (string) $_POST['extra_prompt'] ) )
 		: null;
 
+	// Which fields this run writes. Sent per request like the weights, so the
+	// tick boxes beside Generate take effect immediately without saving a form.
+	$fields = isset( $_POST['fields'] ) && is_array( $_POST['fields'] )
+		? ism_ai_sanitise_fields( array_map( 'sanitize_key', wp_unslash( $_POST['fields'] ) ) )
+		: null;
+
 	$generated = ism_ai_generate_for_attachment( $attachment_id, [
 		'image_data_url' => $data_url,
 		'override_skip'  => $override,
 		'weights'        => $weights,
 		'extra_prompt'   => $extra,
+		'fields'         => $fields,
 	] );
 
 	if ( is_wp_error( $generated ) ) {
@@ -770,6 +777,31 @@ function ism_ajax_seo_save_advanced(): void {
 	ism_save_settings( $settings );
 
 	wp_send_json_success( [ 'weights' => $weights, 'extra_prompt' => $settings['ai_extra_prompt'] ] );
+}
+
+/**
+ * AJAX: persist which fields generation writes.
+ *
+ * Its own endpoint rather than part of the advanced save, because the tick
+ * boxes live beside the Generate button and not in that form. Folding them in
+ * would mean an unrelated invalid weight total silently refusing to store a
+ * field preference the user had just changed.
+ */
+function ism_ajax_seo_save_fields(): void {
+	check_ajax_referer( 'ism_seo', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	$fields = ism_ai_sanitise_fields(
+		array_map( 'sanitize_key', (array) wp_unslash( $_POST['fields'] ?? [] ) )
+	);
+
+	$settings              = ism_get_settings();
+	$settings['ai_fields'] = $fields;
+	ism_save_settings( $settings );
+
+	wp_send_json_success( [ 'fields' => $fields ] );
 }
 
 /**
