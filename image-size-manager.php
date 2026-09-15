@@ -848,8 +848,10 @@ function ism_register_settings(): void {
 /**
  * Suppress WordPress's built-in big-image ( -scaled ) behaviour when the plugin
  * has its own max-upload dimensions configured.
+ *
+ * @return int|false
  */
-function ism_big_image_threshold( int $threshold ): int|false {
+function ism_big_image_threshold( int $threshold ) {
 	$s     = ism_get_settings();
 	$max_w = (int) $s['max_upload_width'];
 	$max_h = (int) $s['max_upload_height'];
