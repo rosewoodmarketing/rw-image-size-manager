@@ -25,7 +25,10 @@ map of every image to every page, template and custom field that references it
 
 ## The 30-minute path
 
-### 0. Before you start (one time per site)
+The headings below match the **Step 1** to **Step 4** cards on the
+*RW Image Manager → Image SEO* tab.
+
+### Before you start (one time per site)
 
 1. **Update the plugin** to 2.2.0+ via **Dashboard → Updates** (it self-updates
    from GitHub).
@@ -34,7 +37,7 @@ map of every image to every page, template and custom field that references it
    Without a key everything except generation still works — the audit, the
    duplicate review, and broken-image detection all run fine.
 
-### 1. Build the usage index — ~1 min
+### Step 1: Build the usage index (about 1 min)
 
 *Image SEO → Step 1 → Build index.*
 
@@ -42,22 +45,21 @@ Maps every image to everything that references it. **Generation is meaningless
 without this** — skip it and every image looks unused. Rebuild after a big
 content import.
 
-### 2. Scan the library — ~1 min
+### Step 2: Scan the library, then read the chart (about 6 min)
 
 *Step 2 → Load chart.* Fingerprints files for duplicate detection, then
 classifies everything. Cached afterwards, so it's ~2s on later visits. Use
 **Rescan** after uploading or deleting images.
 
-### 3. Read the chart before spending anything — 5 min
-
-Four independent filters:
+The **Image usage chart** appears once the scan finishes. Read it before
+spending anything. It has four independent filters:
 
 | Filter | Use it for |
 |---|---|
 | **Images** | On the site (default) · Decorative/unsupported · Not on any page · All |
 | **Review** | Unreviewed (default) · Reviewed · All |
 | **Proposals** | All · Current proposals only |
-| **Metadata** | Missing any field · Missing alt text · Missing description · Nothing missing |
+| **Metadata** | All (default) · Missing any field · Missing alt text · Missing description · Nothing missing |
 
 **Start with Metadata → Missing alt text.** That's the actual job. On the
 pilot site it was 484 of 720 usable images.
@@ -71,7 +73,10 @@ treat *Missing any field* as an inventory rather than a to-do list.
 Each row shows every page the image appears on, whether it's that page's
 featured image, and which fields are currently empty.
 
-### 4. Generate a small batch first — 5 min
+### Step 3: Generate proposals, small batch first (about 5 min)
+
+**This card stays hidden until the chart has loaded in Step 2.** If you can't
+find the Generate button or the length table, click **Load chart** first.
 
 Two ways to choose what runs. Tick rows in the chart (**Select all shown**
 ticks every row matching the filters, on every page; **Deselect all** clears
@@ -96,8 +101,8 @@ in a few lightbox plugins. On a typical site it is never rendered in the DOM.
 The field that *does* render under an image is the caption (`post_excerpt`),
 which is a separate field this plugin does not write. Turn Description on if
 your theme or a gallery plugin actually displays it — otherwise it is output
-tokens spent on something nobody sees. Measured on the pilot site, adding it
-costs about 55% more per image.
+tokens spent on something nobody sees. Adding it costs roughly 45% more per
+image.
 
 **Set length limits** in the table under the field boxes: a minimum and
 maximum character count per field, 0 for no limit. Defaults are title 60 and
@@ -118,14 +123,23 @@ Two things worth setting once, under **Advanced AI settings**:
   page context vs. existing metadata. A source set to **0 is genuinely omitted
   from the request**, which is a real cost saving and a real behaviour change.
 
-### 5. Review and apply — 10 min
+### Step 4: Review and apply (about 10 min)
 
 Nothing is written until you press **Apply selected**. Every field is editable
-first. An empty field is left alone rather than cleared.
+first, directly in the chart rows. An empty field is left alone rather than
+cleared.
 
+- **Select all with changes** ticks every image with a proposal or an edit
+  waiting, wherever it sits in the chart. **Deselect all** clears every tick.
+  Apply writes every ticked row, including rows the current filter hides, and
+  the selection count tells you when some are hidden.
+- **Show only these** switches the chart to just the images with pending
+  changes, which is the easiest way to read through them.
 - **Apply** marks the image reviewed automatically.
 - **Reject proposal** drops the suggestion and leaves the image unreviewed —
   it still needs a decision.
+- **Discard proposals** throws away *every* unapplied proposal on the site,
+  not just ticked ones. It asks first, and the tokens already spent are gone.
 - Reviewed images drop out of the default view, so progress is visible.
 
 Writes only the fields you ticked: alt → `_wp_attachment_image_alt`,
@@ -135,9 +149,11 @@ never touches an existing description.
 
 ---
 
-## The other two tabs
+## Duplicates and broken images
 
 ### Duplicate review (read-only)
+
+A card on the Image SEO tab, below the chart.
 
 Files are hashed during the scan; byte-identical copies fold into one row, so
 you generate once and Apply writes to every copy.
@@ -154,6 +170,8 @@ in this panel deletes anything; removal is done from each attachment's own
 edit screen, deliberately.
 
 ### Broken images
+
+Its own tab: *RW Image Manager → Broken Images*.
 
 Finds two faults WordPress never reports: references to attachments that have
 been deleted, and references to files missing from disk.
