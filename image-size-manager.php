@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       RW Image Manager
  * Plugin URI:        https://github.com/rosewoodmarketing/rw-image-size-manager
- * Description:       View, toggle, customize, and add image sizes. Per-post-type size allowlists, max upload dimensions, bulk thumbnail regeneration, a media log, and an orphaned-file scanner.
- * Version:           2.1.2
+ * Description:       Image sizes, bulk regeneration and upload limits, plus page-context-aware AI titles, alt text and descriptions, duplicate review, and broken-image repair.
+ * Version:           2.2.0
  * Author:            Anthony Burkholder
  * License:           GPL-2.0+
  * Text Domain:       image-size-manager
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ISM_VERSION',     '2.1.2' );
+define( 'ISM_VERSION',     '2.2.0' );
 define( 'ISM_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'ISM_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'ISM_OPTION_KEY',  'ism_settings' );
@@ -104,6 +104,7 @@ add_action( 'wp_ajax_ism_seo_reject',     'ism_ajax_seo_reject' );
 add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
 add_action( 'wp_ajax_ism_seo_save_advanced', 'ism_ajax_seo_save_advanced' );
 add_action( 'wp_ajax_ism_seo_save_fields', 'ism_ajax_seo_save_fields' );
+add_action( 'wp_ajax_ism_seo_save_lengths', 'ism_ajax_seo_save_lengths' );
 add_action( 'wp_ajax_ism_seo_duplicates', 'ism_ajax_seo_duplicates' );
 
 // AJAX: Broken Images tab — detection and match suggestion. No repoint path

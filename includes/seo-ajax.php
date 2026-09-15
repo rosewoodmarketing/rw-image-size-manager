@@ -457,12 +457,18 @@ function ism_ajax_seo_generate(): void {
 		? ism_ai_sanitise_fields( array_map( 'sanitize_key', wp_unslash( $_POST['fields'] ) ) )
 		: null;
 
+	// Length ranges, sent per request for the same reason as the fields.
+	$lengths = isset( $_POST['lengths'] ) && is_array( $_POST['lengths'] )
+		? ism_ai_sanitise_lengths( ism_seo_int_lengths( wp_unslash( $_POST['lengths'] ) ) )
+		: null;
+
 	$generated = ism_ai_generate_for_attachment( $attachment_id, [
 		'image_data_url' => $data_url,
 		'override_skip'  => $override,
 		'weights'        => $weights,
 		'extra_prompt'   => $extra,
 		'fields'         => $fields,
+		'lengths'        => $lengths,
 	] );
 
 	if ( is_wp_error( $generated ) ) {
@@ -495,6 +501,9 @@ function ism_ajax_seo_generate(): void {
 		'alt_text'    => $generated['result']['alt_text'],
 		'description' => $generated['result']['description'],
 		'error'       => '',
+		// Fields still outside their range after the rewrite. Kept with the
+		// proposal so a reload still shows why the row is flagged.
+		'warnings'    => (array) ( $generated['length_warnings'] ?? [] ),
 	];
 
 	ism_seo_record_result( $attachment_id, $proposal, $generated['usage'] );
@@ -508,7 +517,30 @@ function ism_ajax_seo_generate(): void {
 		'run_usage'     => $state['usage'],
 		'source'        => $generated['image']['source'],
 		'model'         => $generated['model'],
+		'retries'       => (int) ( $generated['length_retries'] ?? 0 ),
 	] );
+}
+
+/**
+ * Cast a submitted length set to integers without trusting its shape.
+ *
+ * @param mixed $raw
+ * @return array<string,array{min:int,max:int}>
+ */
+function ism_seo_int_lengths( $raw ): array {
+	$out = [];
+	foreach ( (array) $raw as $field => $range ) {
+		$field = sanitize_key( (string) $field );
+		if ( $field === '' || ! is_array( $range ) ) {
+			continue;
+		}
+		$out[ $field ] = [
+			'min' => (int) ( $range['min'] ?? 0 ),
+			'max' => (int) ( $range['max'] ?? 0 ),
+		];
+	}
+
+	return $out;
 }
 
 /**
@@ -802,6 +834,36 @@ function ism_ajax_seo_save_fields(): void {
 	ism_save_settings( $settings );
 
 	wp_send_json_success( [ 'fields' => $fields ] );
+}
+
+/**
+ * AJAX: persist the character ranges generation aims for.
+ *
+ * Separate from the fields save for the same reason that one is separate from
+ * the advanced save: an impossible range on one field should not stop a field
+ * preference from being stored. The whole set is checked, not only ticked
+ * fields, because a stored range will apply the moment its field is ticked.
+ */
+function ism_ajax_seo_save_lengths(): void {
+	check_ajax_referer( 'ism_seo', 'nonce' );
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( 'Unauthorized', 403 );
+	}
+
+	$lengths = ism_ai_sanitise_lengths(
+		ism_seo_int_lengths( wp_unslash( $_POST['lengths'] ?? [] ) )
+	);
+
+	$error = ism_ai_lengths_error( $lengths );
+	if ( $error !== '' ) {
+		wp_send_json_error( $error );
+	}
+
+	$settings               = ism_get_settings();
+	$settings['ai_lengths'] = $lengths;
+	ism_save_settings( $settings );
+
+	wp_send_json_success( [ 'lengths' => $lengths ] );
 }
 
 /**

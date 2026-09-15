@@ -94,6 +94,17 @@ define( 'ISM_AI_MAX_RETRIES', 3 );
 /** Ceiling on any single backoff sleep, so one retry cannot stall a request. */
 define( 'ISM_AI_MAX_BACKOFF', 30 );
 
+/**
+ * Follow-up requests allowed when a generated field misses its length range.
+ *
+ * Structured outputs cannot enforce minLength or maxLength (the API rejects
+ * both), and models count characters poorly, so the range is stated in the
+ * prompt and checked here afterwards. One rewrite fixes nearly every miss;
+ * anything still outside is flagged for review rather than cut off, because a
+ * truncated alt text is worse than a long one.
+ */
+define( 'ISM_AI_LENGTH_RETRIES', 1 );
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The key
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,13 +291,14 @@ function ism_ai_models(): array {
  * @param string $model
  * @return float Dollars per 100 images.
  */
-function ism_ai_cost_per_100( string $model, ?array $fields = null ): float {
+function ism_ai_cost_per_100( string $model, ?array $fields = null, ?array $lengths = null ): float {
 	$m = ism_ai_models()[ $model ] ?? null;
 	if ( ! $m ) {
 		return 0.0;
 	}
 
-	$fields = $fields === null ? ism_ai_get_fields() : ism_ai_sanitise_fields( $fields );
+	$fields  = $fields === null ? ism_ai_get_fields() : ism_ai_sanitise_fields( $fields );
+	$lengths = $lengths === null ? ism_ai_get_lengths() : ism_ai_sanitise_lengths( $lengths );
 
 	// Measured on the pilot site: a 300px image, a few hundred characters of
 	// page context, and the JSON that comes back. Output dominates the spread
@@ -294,12 +306,10 @@ function ism_ai_cost_per_100( string $model, ?array $fields = null ): float {
 	// is a few words — so it is counted per field rather than as one flat
 	// figure. Input barely moves, since the image and the page context are the
 	// bulk of it and neither depends on what is being written.
-	$per_field = [ 'title' => 20, 'alt_text' => 40, 'description' => 95 ];
-
 	$input_tokens  = 700 + ( 40 * count( $fields ) );
 	$output_tokens = 12;
 	foreach ( $fields as $field ) {
-		$output_tokens += $per_field[ $field ];
+		$output_tokens += ism_ai_field_output_tokens( $field, $lengths[ $field ] );
 	}
 
 	$per_image = ( $input_tokens * $m['in'] / 1000000 ) + ( $output_tokens * $m['out'] / 1000000 );
@@ -435,12 +445,21 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'weights'        => null,
 		'extra_prompt'   => null,
 		'fields'         => null,
+		'lengths'        => null,
 	] );
 
 	$model   = (string) $args['model'];
 	$weights = $args['weights'] === null ? ism_ai_get_weights() : ism_ai_normalise_weights( (array) $args['weights'] );
 	$extra   = $args['extra_prompt'] === null ? ism_ai_get_extra_prompt() : trim( (string) $args['extra_prompt'] );
 	$fields  = $args['fields'] === null ? ism_ai_get_fields() : ism_ai_sanitise_fields( $args['fields'] );
+	$lengths = $args['lengths'] === null ? ism_ai_get_lengths() : ism_ai_sanitise_lengths( (array) $args['lengths'] );
+
+	// Refused before anything is built, like an invalid weight total: a range
+	// with nothing inside it would spend a request on an unmeetable demand.
+	$length_error = ism_ai_lengths_error( $lengths, $fields );
+	if ( $length_error !== '' ) {
+		return new WP_Error( 'ism_ai_bad_lengths', $length_error );
+	}
 
 	// A source weighted at zero is not sent at all, so an empty instruction and
 	// a zeroed instruction weight mean the same thing.
@@ -505,7 +524,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 	$output_config = [
 		'format' => [
 			'type'   => 'json_schema',
-			'schema' => ism_ai_output_schema( $fields ),
+			'schema' => ism_ai_output_schema( $fields, $lengths ),
 		],
 	];
 
@@ -526,7 +545,7 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		'system'     => [
 			[
 				'type'          => 'text',
-				'text'          => ism_ai_system_prompt( $fields ),
+				'text'          => ism_ai_system_prompt( $fields, $lengths ),
 				'cache_control' => [ 'type' => 'ephemeral' ],
 			],
 		],
@@ -580,18 +599,65 @@ function ism_ai_generate_for_attachment( int $attachment_id, array $args = [] ) 
 		return $response;
 	}
 
-	$text = ism_ai_response_text( $response );
+	$text   = ism_ai_response_text( $response );
+	$result = ism_ai_parse_response( $text, $fields );
+	$usage  = ism_ai_usage( $response );
+
+	// Length check, and at most ISM_AI_LENGTH_RETRIES rewrites of the fields
+	// that missed. The rewrite continues the same conversation, image included,
+	// because lengthening a too-short field needs something to add and the
+	// picture is where that comes from. Only images that miss pay for it.
+	$violations = $result === null ? [] : ism_ai_length_violations( $result, $fields, $lengths );
+	$retried    = 0;
+
+	while ( $violations && $retried < ISM_AI_LENGTH_RETRIES ) {
+		$retried++;
+
+		$repair_body               = $body;
+		$repair_body['messages'][] = [ 'role' => 'assistant', 'content' => $text ];
+		$repair_body['messages'][] = [ 'role' => 'user', 'content' => ism_ai_length_repair_prompt( $violations ) ];
+
+		$repair = ism_ai_request( $repair_body );
+
+		// A failed rewrite costs the rewrite, not the image. The first result
+		// is still a usable proposal; it just goes to review flagged.
+		if ( is_wp_error( $repair ) ) {
+			break;
+		}
+
+		$usage = ism_ai_usage_add( $usage, ism_ai_usage( $repair ) );
+
+		$repair_text   = ism_ai_response_text( $repair );
+		$repair_result = ism_ai_parse_response( $repair_text, $fields );
+		if ( $repair_result === null ) {
+			break;
+		}
+
+		// Only the flagged fields are taken from the rewrite. The others were
+		// already acceptable, and letting them drift on a second pass would
+		// change text nobody asked to change.
+		foreach ( array_keys( $violations ) as $field ) {
+			$result[ $field ] = $repair_result[ $field ];
+		}
+
+		$text       = $repair_text;
+		$violations = ism_ai_length_violations( $result, $fields, $lengths );
+	}
 
 	return [
-		'attachment_id' => $attachment_id,
-		'result'        => ism_ai_parse_response( $text, $fields ),
-		'raw'           => $text,
-		'prompt'        => $prompt,
-		'usage'         => ism_ai_usage( $response ),
-		'model'         => (string) ( $response['model'] ?? $model ),
-		'stop_reason'   => (string) ( $response['stop_reason'] ?? '' ),
-		'image'         => $image ? $image['meta'] : [ 'source' => 'none', 'media_type' => '', 'bytes' => 0 ],
-		'weights'       => $weights,
+		'attachment_id'   => $attachment_id,
+		'result'          => $result,
+		'raw'             => $text,
+		'prompt'          => $prompt,
+		'usage'           => $usage,
+		'model'           => (string) ( $response['model'] ?? $model ),
+		'stop_reason'     => (string) ( $response['stop_reason'] ?? '' ),
+		'image'           => $image ? $image['meta'] : [ 'source' => 'none', 'media_type' => '', 'bytes' => 0 ],
+		'weights'         => $weights,
+		'length_retries'  => $retried,
+		'length_warnings' => array_map( function ( $v ) {
+			return $v['message'];
+		}, $violations ),
 	];
 }
 
@@ -746,6 +812,243 @@ function ism_ai_get_fields(): array {
 	return ism_ai_sanitise_fields( $settings['ai_fields'] );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Length limits
+//
+// A minimum and maximum character count per field, 0 meaning no limit. Counted
+// in characters (mb_strlen), spaces and punctuation included, because that is
+// how SEO tools and the WordPress admin count them.
+//
+// Enforced in three layers, since the first two are only requests:
+//   1. The range is written into the field's spec in the system prompt.
+//   2. It is repeated in the schema property's description. Structured outputs
+//      reject minLength and maxLength outright, so the schema cannot enforce
+//      it, but a description is allowed and the model reads it.
+//   3. The result is measured here, and a miss gets one targeted rewrite.
+//      Anything still outside is flagged in review. Nothing is ever truncated.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Starting ranges. These reproduce the guidance the prompt carried before
+ * limits were configurable: titles around 60, alt text around 125, and
+ * descriptions left to the "two or three sentences" instruction.
+ *
+ * 125 for alt text is a widely repeated guideline, not a screen-reader limit.
+ * Screen readers read the whole attribute; the number exists to keep alt text
+ * to what a listener actually needs.
+ *
+ * @return array<string,array{min:int,max:int}>
+ */
+function ism_ai_default_lengths(): array {
+	return [
+		'title'       => [ 'min' => 0, 'max' => 60 ],
+		'alt_text'    => [ 'min' => 0, 'max' => 125 ],
+		'description' => [ 'min' => 0, 'max' => 0 ],
+	];
+}
+
+/**
+ * Highest value either bound may take, per field. Past these a limit stops
+ * meaning anything for that field.
+ *
+ * @return array<string,int>
+ */
+function ism_ai_length_ceilings(): array {
+	return [
+		'title'       => 200,
+		'alt_text'    => 500,
+		'description' => 2000,
+	];
+}
+
+/**
+ * Reduce arbitrary input to a complete, clamped length set.
+ *
+ * Clamps each bound to 0..ceiling. Does not reorder a minimum that exceeds its
+ * maximum; ism_ai_lengths_error() reports that instead, for the same reason
+ * weights are refused rather than rescaled.
+ *
+ * @param mixed $lengths
+ * @return array<string,array{min:int,max:int}>
+ */
+function ism_ai_sanitise_lengths( $lengths ): array {
+	$lengths  = is_array( $lengths ) ? $lengths : [];
+	$defaults = ism_ai_default_lengths();
+	$ceilings = ism_ai_length_ceilings();
+	$out      = [];
+
+	foreach ( $defaults as $field => $default ) {
+		$given = isset( $lengths[ $field ] ) && is_array( $lengths[ $field ] ) ? $lengths[ $field ] : [];
+
+		foreach ( [ 'min', 'max' ] as $bound ) {
+			$value = array_key_exists( $bound, $given ) ? (int) $given[ $bound ] : $default[ $bound ];
+
+			$out[ $field ][ $bound ] = max( 0, min( $ceilings[ $field ], $value ) );
+		}
+	}
+
+	return $out;
+}
+
+/**
+ * Why a length set cannot be used, or an empty string when it can.
+ *
+ * Only fields in $fields are checked, so an impossible range on a field that
+ * is not being generated does not block a run that never asks for it.
+ *
+ * @param array<string,array{min:int,max:int}> $lengths
+ * @param string[]|null                        $fields
+ * @return string
+ */
+function ism_ai_lengths_error( array $lengths, ?array $fields = null ): string {
+	$fields = $fields === null ? array_keys( ism_ai_fields() ) : $fields;
+	$labels = ism_ai_fields();
+
+	foreach ( $fields as $field ) {
+		$min = (int) ( $lengths[ $field ]['min'] ?? 0 );
+		$max = (int) ( $lengths[ $field ]['max'] ?? 0 );
+
+		if ( $max > 0 && $min > $max ) {
+			return sprintf(
+				'%s: the minimum (%d) is higher than the maximum (%d).',
+				$labels[ $field ] ?? $field,
+				$min,
+				$max
+			);
+		}
+	}
+
+	return '';
+}
+
+/**
+ * The lengths this site generates with, unless a run overrides them.
+ *
+ * @return array<string,array{min:int,max:int}>
+ */
+function ism_ai_get_lengths(): array {
+	$settings = ism_get_settings();
+
+	return ism_ai_sanitise_lengths( $settings['ai_lengths'] ?? [] );
+}
+
+/**
+ * A range as the prompt states it.
+ *
+ * @param int $min
+ * @param int $max
+ * @return string Empty when the field has no limit.
+ */
+function ism_ai_length_phrase( int $min, int $max ): string {
+	if ( $min > 0 && $max > 0 ) {
+		return $min === $max
+			? sprintf( 'exactly %d characters', $max )
+			: sprintf( 'between %d and %d characters', $min, $max );
+	}
+	if ( $max > 0 ) {
+		return sprintf( 'at most %d characters', $max );
+	}
+	if ( $min > 0 ) {
+		return sprintf( 'at least %d characters', $min );
+	}
+
+	return '';
+}
+
+/**
+ * Fields in a parsed result that fall outside their range.
+ *
+ * @param array                                $result  Parsed result.
+ * @param string[]                             $fields  Fields that were requested.
+ * @param array<string,array{min:int,max:int}> $lengths
+ * @return array<string,array{length:int,min:int,max:int,message:string}>
+ */
+function ism_ai_length_violations( array $result, array $fields, array $lengths ): array {
+	$labels = ism_ai_fields();
+	$out    = [];
+
+	foreach ( $fields as $field ) {
+		$min    = (int) ( $lengths[ $field ]['min'] ?? 0 );
+		$max    = (int) ( $lengths[ $field ]['max'] ?? 0 );
+		$length = mb_strlen( (string) ( $result[ $field ] ?? '' ), 'UTF-8' );
+
+		$short = $min > 0 && $length < $min;
+		$long  = $max > 0 && $length > $max;
+
+		if ( ! $short && ! $long ) {
+			continue;
+		}
+
+		$out[ $field ] = [
+			'length'  => $length,
+			'min'     => $min,
+			'max'     => $max,
+			'message' => sprintf(
+				'%s is %d characters; it must be %s.',
+				$labels[ $field ] ?? $field,
+				$length,
+				ism_ai_length_phrase( $min, $max )
+			),
+		];
+	}
+
+	return $out;
+}
+
+/**
+ * The follow-up turn asking for flagged fields to be rewritten.
+ *
+ * @param array<string,array{length:int,min:int,max:int,message:string}> $violations
+ * @return string
+ */
+function ism_ai_length_repair_prompt( array $violations ): string {
+	$lines = [];
+	foreach ( $violations as $field => $v ) {
+		$lines[] = sprintf(
+			'- %s is %d characters. It must be %s.',
+			$field,
+			$v['length'],
+			ism_ai_length_phrase( $v['min'], $v['max'] )
+		);
+	}
+
+	return "These fields are outside their required length:\n"
+		. implode( "\n", $lines )
+		. "\n\nRewrite only those fields so they fit, keeping them accurate to the image "
+		. 'and the page context. Shorten by removing less important detail, not by '
+		. 'cutting a sentence off; lengthen only with detail that is actually visible '
+		. 'or established by the context. Count every character, including spaces, and '
+		. 'aim comfortably inside the range rather than at its edge. Return the complete '
+		. 'JSON object again with every field.';
+}
+
+/**
+ * Expected output tokens for one field, for cost estimates.
+ *
+ * With a maximum set, the reply lands a little under it; roughly four
+ * characters to a token, plus the key and quoting. Without one, the figures
+ * measured on the pilot site stand.
+ *
+ * @param string              $field
+ * @param array{min:int,max:int} $range
+ * @return int
+ */
+function ism_ai_field_output_tokens( string $field, array $range ): int {
+	$measured = [ 'title' => 20, 'alt_text' => 40, 'description' => 95 ];
+	$base     = $measured[ $field ] ?? 40;
+	$min      = (int) ( $range['min'] ?? 0 );
+	$max      = (int) ( $range['max'] ?? 0 );
+
+	if ( $max > 0 ) {
+		return (int) ceil( ( $max * 0.85 ) / 4 ) + 6;
+	}
+	if ( $min > 0 ) {
+		return max( $base, (int) ceil( ( $min * 1.15 ) / 4 ) + 6 );
+	}
+
+	return $base;
+}
+
 /**
  * Turn a weight set into an instruction about which source wins a disagreement.
  *
@@ -801,27 +1104,45 @@ function ism_ai_render_weighting( array $weights ): string {
  *
  * @return string
  */
-function ism_ai_system_prompt( ?array $fields = null ): string {
-	$fields = $fields === null ? ism_ai_default_fields() : ism_ai_sanitise_fields( $fields );
+function ism_ai_system_prompt( ?array $fields = null, ?array $lengths = null ): string {
+	$fields  = $fields === null ? ism_ai_default_fields() : ism_ai_sanitise_fields( $fields );
+	$lengths = $lengths === null ? ism_ai_default_lengths() : ism_ai_sanitise_lengths( $lengths );
+
+	$phrase = [];
+	foreach ( array_keys( ism_ai_fields() ) as $field ) {
+		$phrase[ $field ] = ism_ai_length_phrase( $lengths[ $field ]['min'], $lengths[ $field ]['max'] );
+	}
+
+	// A configured range replaces the soft wording rather than sitting beside
+	// it, so the prompt never gives two different numbers for one field.
+	$description_shape = $phrase['description'] === ''
+		? 'two or three sentences of additional detail'
+		: 'additional detail';
 
 	$specs = [
 		'title' => '- title: a short human-readable name for the image in the media library.
-  Sentence case, no file extension, no dimensions, under about 60 characters.',
+  Sentence case, no file extension, no dimensions.'
+			. ( $phrase['title'] !== '' ? "\n  Length: " . $phrase['title'] . '.' : '' ),
 
 		'alt_text' => '- alt_text: what a screen-reader user needs in order to understand why this
   image is on the page. Describe what is actually visible, specifically and
-  concretely. Do not begin with "image of", "picture of", or "photo of" — a
-  screen reader already announces that it is an image. Do not stuff keywords.
-  Under about 125 characters.',
+  concretely. Do not begin with "image of", "picture of", or "photo of"; a
+  screen reader already announces that it is an image. Do not stuff keywords.'
+			. ( $phrase['alt_text'] !== '' ? "\n  Length: " . $phrase['alt_text'] . '.' : '' ),
 
-		'description' => '- description: two or three sentences of additional detail for the media
+		'description' => '- description: ' . $description_shape . ' for the media
   library, covering what the image shows and how it relates to the page it
-  appears on.',
+  appears on.'
+			. ( $phrase['description'] !== '' ? "\n  Length: " . $phrase['description'] . '.' : '' ),
 	];
 
-	$wanted = [];
+	$wanted  = [];
+	$limited = false;
 	foreach ( $fields as $field ) {
 		$wanted[] = $specs[ $field ];
+		if ( $phrase[ $field ] !== '' ) {
+			$limited = true;
+		}
 	}
 
 	$count = count( $fields ) === 1 ? 'one field' : ( count( $fields ) === 2 ? 'two fields' : 'three fields' );
@@ -859,6 +1180,15 @@ and more specific title than the filename suggests — never copy it back.
 PROMPT;
 	}
 
+	if ( $limited ) {
+		$prompt .= "\n\n" . <<<'PROMPT'
+Lengths are hard limits, counted in characters including spaces and
+punctuation. A field outside its range is rejected. Aim comfortably inside
+each range rather than at its edge, and meet a limit by choosing what matters
+most, never by cutting a sentence off.
+PROMPT;
+	}
+
 	$prompt .= "\n\n" . <<<'PROMPT'
 If the context says the image was not found on any page, describe only what you
 can actually see and do not invent a purpose for it.
@@ -875,12 +1205,20 @@ PROMPT;
  *
  * @return array
  */
-function ism_ai_output_schema( ?array $fields = null ): array {
-	$fields = $fields === null ? ism_ai_default_fields() : ism_ai_sanitise_fields( $fields );
+function ism_ai_output_schema( ?array $fields = null, ?array $lengths = null ): array {
+	$fields  = $fields === null ? ism_ai_default_fields() : ism_ai_sanitise_fields( $fields );
+	$lengths = $lengths === null ? ism_ai_default_lengths() : ism_ai_sanitise_lengths( $lengths );
 
 	$properties = [];
 	foreach ( $fields as $field ) {
 		$properties[ $field ] = [ 'type' => 'string' ];
+
+		// Not minLength or maxLength: structured outputs reject both with a
+		// 400. A description is accepted and is read by the model.
+		$phrase = ism_ai_length_phrase( $lengths[ $field ]['min'], $lengths[ $field ]['max'] );
+		if ( $phrase !== '' ) {
+			$properties[ $field ]['description'] = 'Length: ' . $phrase . ', including spaces.';
+		}
 	}
 
 	return [
@@ -1243,4 +1581,19 @@ function ism_ai_empty_usage(): array {
 		'total_input_tokens'          => 0,
 		'total_tokens'                => 0,
 	];
+}
+
+/**
+ * Sum two usage arrays, key by key.
+ *
+ * @param array<string,int> $a
+ * @param array<string,int> $b
+ * @return array<string,int>
+ */
+function ism_ai_usage_add( array $a, array $b ): array {
+	foreach ( $b as $key => $value ) {
+		$a[ $key ] = (int) ( $a[ $key ] ?? 0 ) + (int) $value;
+	}
+
+	return $a;
 }

@@ -27,7 +27,7 @@ map of every image to every page, template and custom field that references it
 
 ### 0. Before you start (one time per site)
 
-1. **Update the plugin** to 2.0.0+ via **Dashboard → Updates** (it self-updates
+1. **Update the plugin** to 2.2.0+ via **Dashboard → Updates** (it self-updates
    from GitHub).
 2. **Add an API key.** *RW Image Manager → Image SEO → Anthropic API Key.*
    Paste, save. Stored in its own option, never sent to the browser.
@@ -96,6 +96,15 @@ which is a separate field this plugin does not write. Turn Description on if
 your theme or a gallery plugin actually displays it — otherwise it is output
 tokens spent on something nobody sees. Measured on the pilot site, adding it
 costs about 55% more per image.
+
+**Set length limits** in the table under the field boxes: a minimum and
+maximum character count per field, 0 for no limit. Defaults are title 60 and
+alt text 125, with description unlimited. The model is told the range and every
+result is measured; a field that misses gets one automatic rewrite (roughly one
+extra request for that image). Anything still outside shows a **length off**
+badge and a red character count in review. It is never cut off, and Apply asks
+before writing it. Treat 125 for alt text as a guideline, not a hard rule:
+screen readers read the whole attribute.
 
 Two things worth setting once, under **Advanced AI settings**:
 
@@ -184,8 +193,9 @@ override per image. Prose alt text on a decorative mark is a correctness bug,
 not a missing feature.
 
 **Cost.** Roughly **$0.11 per 100 images** on the default model with the
-default fields (Title + Alt text) — about **$0.17** if you also tick
-Description. A 700-image library is well under a dollar either way. Model and
+default fields (Title + Alt text) — about **$0.16** if you also tick
+Description. Images that miss a length limit cost roughly double for that
+image, because of the rewrite. A 700-image library is well under a dollar either way. Model and
 cost-per-100 are both shown in settings and update with your field choice.
 
 ---

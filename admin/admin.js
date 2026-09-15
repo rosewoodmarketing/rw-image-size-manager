@@ -1409,6 +1409,9 @@
 		var p = seoGroupProposal( g );
 		if ( p && ! p.error ) { b += '<span class="ism-badge ism-badge-proposed">proposed</span>'; }
 		if ( p && p.error )   { b += '<span class="ism-badge ism-badge-failed">failed</span>'; }
+		if ( seoLengthProblems( g ).length ) {
+			b += '<span class="ism-badge ism-badge-length">length off</span>';
+		}
 		return b;
 	}
 
@@ -1465,7 +1468,9 @@
 			: '';
 
 		return '<div class="ism-seo-field' + ( changed ? ' ism-seo-field-changed' : '' ) + '">'
-			+ '<label>' + esc( label ) + '</label>' + input + was + '</div>';
+			+ '<label>' + esc( label ) + '</label>' + input
+			+ ( value !== '' ? seoCountHtml( key, value, changed ) : '' )
+			+ was + '</div>';
 	}
 
 	function seoRenderChart() {
@@ -1630,6 +1635,21 @@
 		if ( ! seoEdits[ k ] ) { seoEdits[ k ] = seoGroupValues( g ); }
 		seoEdits[ k ][ $f.data( 'field' ) ] = $f.val();
 
+		// The row is not redrawn while typing, so the counter and the badge
+		// are updated in place.
+		var fk      = String( $f.data( 'field' ) );
+		var val     = String( $f.val() );
+		var changed = val !== ( ( g.rep.current || {} )[ fk ] || '' );
+		var $count  = $f.siblings( '.ism-seo-count' );
+		if ( val === '' ) {
+			$count.remove();
+		} else if ( $count.length ) {
+			$count.replaceWith( seoCountHtml( fk, val, changed ) );
+		} else {
+			$f.after( seoCountHtml( fk, val, changed ) );
+		}
+		$f.closest( '.ism-seo-row' ).find( '.ism-seo-badges' ).html( seoBadges( g ) );
+
 		// Typing is a staged change, so the count above has to move with it.
 		// Without this the card kept reporting whatever the last generate run
 		// produced while the filter it points at showed more rows than that.
@@ -1681,6 +1701,7 @@
 				override_skip:  override ? 1 : 0,
 				weights:        seoWeights(),
 				fields:         seoFields(),
+				lengths:        seoLengths(),
 				extra_prompt:   $( '#ism-ai-extra-prompt' ).val() || ''
 			}, function ( res ) {
 				if ( res.success ) {
@@ -1852,6 +1873,14 @@
 
 		if ( ! rows.length ) {
 			$( '.ism-seo-apply-status' ).text( 'Nothing ticked.' );
+			return;
+		}
+
+		var offRange = seoGroups.filter( function ( g ) {
+			return seoChecked[ g.key ] && seoLengthProblems( g ).length > 0;
+		} ).length;
+		if ( offRange && ! window.confirm( offRange + ' of the ticked image(s) have a field outside its length range'
+			+ ' (marked "length off"). Write them anyway?' ) ) {
 			return;
 		}
 
@@ -2087,6 +2116,72 @@
 		return seoFields().length > 0;
 	}
 
+	// Character ranges per field, read from the DOM on every call for the same
+	// reason as seoFields(). 0 means no limit on that bound.
+	function seoLengths() {
+		var out = {};
+		$( '.ism-seo-len' ).each( function () {
+			var f = String( $( this ).data( 'field' ) );
+			var b = String( $( this ).data( 'bound' ) );
+			var v = parseInt( $( this ).val(), 10 );
+			if ( ! out[ f ] ) { out[ f ] = { min: 0, max: 0 }; }
+			out[ f ][ b ] = isNaN( v ) || v < 0 ? 0 : v;
+		} );
+		return out;
+	}
+
+	// Empty string when usable. Only ticked fields can block a run; an
+	// impossible range on an unticked field is reported but does not stop it.
+	function seoLengthsError( onlyTicked ) {
+		var L = seoLengths();
+		var fields = onlyTicked ? seoFields() : Object.keys( L );
+		for ( var i = 0; i < fields.length; i++ ) {
+			var r = L[ fields[ i ] ];
+			if ( r && r.max > 0 && r.min > r.max ) {
+				return ( SEO_FIELD_LABELS[ fields[ i ] ] || fields[ i ] )
+					+ ': the minimum (' + r.min + ') is higher than the maximum (' + r.max + ').';
+			}
+		}
+		return '';
+	}
+
+	// Counted by code point, which matches PHP's mb_strlen on the server.
+	function seoCharCount( s ) {
+		return Array.from( String( s || '' ) ).length;
+	}
+
+	function seoLengthOk( field, value ) {
+		var r = seoLengths()[ field ];
+		if ( ! r ) { return true; }
+		var n = seoCharCount( value );
+		return ! ( ( r.min > 0 && n < r.min ) || ( r.max > 0 && n > r.max ) );
+	}
+
+	// Only a value that would actually be written is judged: non-empty and
+	// different from what the image already has.
+	function seoLengthProblems( g ) {
+		var v   = seoGroupValues( g );
+		var cur = g.rep.current || {};
+		var bad = [];
+		$.each( [ 'title', 'alt_text', 'description' ], function ( i, f ) {
+			if ( v[ f ] && v[ f ] !== cur[ f ] && ! seoLengthOk( f, v[ f ] ) ) { bad.push( f ); }
+		} );
+		return bad;
+	}
+
+	function seoCountHtml( field, value, changed ) {
+		var r = seoLengths()[ field ] || { min: 0, max: 0 };
+		var n = seoCharCount( value );
+		var range = r.min > 0 && r.max > 0 ? r.min + ' to ' + r.max
+			: r.max > 0 ? 'max ' + r.max
+			: r.min > 0 ? 'min ' + r.min
+			: '';
+		var bad = changed && value !== '' && ! seoLengthOk( field, value );
+		return '<span class="ism-seo-count' + ( bad ? ' ism-seo-count-bad' : '' ) + '">'
+			+ n + ' characters' + ( range ? ' (' + range + ')' : '' )
+			+ ( bad ? ', outside the range' : '' ) + '</span>';
+	}
+
 	// The label a field is shown under, for messages about it.
 	var SEO_FIELD_LABELS = { title: 'Title', alt_text: 'Alt text', description: 'Description' };
 
@@ -2116,7 +2211,7 @@
 	// separate handlers, and without a single place to decide, whichever ran
 	// last would re-enable the button over the other's objection.
 	function seoSyncGenerateEnabled() {
-		var blocked = ! seoHasKey || ! seoWeightsValid() || ! seoFieldsValid();
+		var blocked = ! seoHasKey || ! seoWeightsValid() || ! seoFieldsValid() || seoLengthsError( true ) !== '';
 		$( '#ism-seo-generate-start' ).prop( 'disabled', blocked );
 	}
 
@@ -2238,9 +2333,22 @@
 
 		// Output is dominated by which fields are asked for. A description is
 		// two or three sentences; a title is a few words.
+		// A maximum pulls that figure toward itself; mirrors
+		// ism_ai_field_output_tokens() on the server.
 		var OUT_TOKENS = { title: 20, alt_text: 40, description: 95 };
+		var lens       = seoLengths();
 		var output     = 12; // JSON scaffolding
-		$.each( fields, function ( i, f ) { output += OUT_TOKENS[ f ] || 40; } );
+		$.each( fields, function ( i, f ) {
+			var base = OUT_TOKENS[ f ] || 40;
+			var r    = lens[ f ] || { min: 0, max: 0 };
+			if ( r.max > 0 ) {
+				output += Math.ceil( ( r.max * 0.85 ) / 4 ) + 6;
+			} else if ( r.min > 0 ) {
+				output += Math.max( base, Math.ceil( ( r.min * 1.15 ) / 4 ) + 6 );
+			} else {
+				output += base;
+			}
+		} );
 
 		var perImage  = ( input * price.in / 1e6 ) + ( output * price.out / 1e6 );
 		var total     = perImage * n;
@@ -2254,6 +2362,13 @@
 		if ( ! seoFieldsValid() ) {
 			$box.html( '<p class="ism-estimate-blocked">No fields ticked. '
 				+ 'Choose at least one field to generate.</p>' ).show();
+			return;
+		}
+
+		var lenErr = seoLengthsError( true );
+		if ( lenErr ) {
+			$box.html( '<p class="ism-estimate-blocked">' + esc( lenErr )
+				+ ' Generation is disabled until the range is fixed.</p>' ).show();
 			return;
 		}
 
@@ -2283,6 +2398,9 @@
 	$( document ).on( 'change', '.ism-seo-genfield', function () {
 		var $warn = $( '.ism-seo-genfields-warn' );
 
+		$( '.ism-seo-length-row[data-field="' + $( this ).val() + '"]' )
+			.toggleClass( 'ism-seo-length-off', ! this.checked );
+
 		if ( ! seoFieldsValid() ) {
 			$warn.text( 'At least one field has to be ticked, or there is nothing to generate.' ).show();
 			seoSyncGenerateEnabled();
@@ -2295,6 +2413,28 @@
 		seoRenderEstimate();
 
 		seoPost( 'ism_seo_save_fields', { fields: seoFields() }, function () {}, function () {} );
+	} );
+
+	// Length ranges take effect on the next image immediately, like the field
+	// boxes, and are saved once typing settles. An impossible range is shown
+	// and not saved, and blocks Generate if its field is ticked.
+	$( document ).on( 'input change', '.ism-seo-len', function () {
+		var err   = seoLengthsError( false );
+		var $warn = $( '.ism-seo-lengths-warn' );
+		$warn.text( err ).toggle( err !== '' );
+
+		seoSyncGenerateEnabled();
+		seoRenderEstimate();
+
+		clearTimeout( window.ismLengthTimer );
+		window.ismLengthTimer = setTimeout( function () {
+			// Counters and badges in the chart depend on the ranges.
+			seoRenderChart();
+			if ( err ) { return; }
+			seoPost( 'ism_seo_save_lengths', { lengths: seoLengths() }, function ( res ) {
+				if ( res && ! res.success && res.data ) { $warn.text( res.data ).show(); }
+			}, function () {} );
+		}, 400 );
 	} );
 
 	// Model note follows the dropdown.

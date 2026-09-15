@@ -846,6 +846,38 @@
 }
 .ism-seo-stats .ism-stat-open strong { color: #1d7e2d; }
 
+/* ── Length ranges ─────────────────────────────────────────────────────── */
+
+.ism-seo-lengths {
+	margin: 10px 0 0;
+	border-collapse: collapse;
+}
+.ism-seo-lengths th,
+.ism-seo-lengths td {
+	padding: 3px 12px 3px 0;
+	text-align: left;
+	font-weight: 400;
+}
+.ism-seo-lengths thead th { font-weight: 600; }
+.ism-seo-lengths .small-text { width: 5em; }
+.ism-seo-length-off { opacity: .55; }
+.ism-seo-genfields .ism-seo-lengths-warn {
+	margin: 8px 0 0;
+	color: #b32d2e;
+	font-weight: 500;
+}
+.ism-seo-count {
+	display: block;
+	margin-top: 2px;
+	font-size: 12px;
+	color: #646970;
+}
+.ism-seo-count-bad {
+	color: #b32d2e;
+	font-weight: 500;
+}
+.ism-badge-length { background: #fcf0e3; color: #8a4b08; }
+
 /* ── Duplicate review (read-only) ───────────────────────────────────────── */
 
 .ism-dupe-status { margin-left: 8px; }

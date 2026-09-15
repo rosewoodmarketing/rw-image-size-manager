@@ -844,6 +844,46 @@ if ( ! defined( 'ABSPATH' ) ) {
 						<?php esc_html_e( 'Unticked fields are not requested from the model at all, so they cost nothing and are left untouched on the image. Description is off by default — it is the attachment\'s post_content, which most themes never render on the front end.', 'image-size-manager' ); ?>
 					</p>
 					<p class="description ism-seo-genfields-warn" style="display:none"></p>
+
+					<?php
+					$ism_lengths  = ism_ai_get_lengths();
+					$ism_ceilings = ism_ai_length_ceilings();
+					?>
+					<table class="ism-seo-lengths" role="presentation">
+						<thead>
+							<tr>
+								<th scope="col"><?php esc_html_e( 'Length, in characters', 'image-size-manager' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Min', 'image-size-manager' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Max', 'image-size-manager' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+						<?php foreach ( ism_ai_fields() as $ism_field_key => $ism_field_label ) : ?>
+							<tr class="ism-seo-length-row<?php echo in_array( $ism_field_key, $ism_gen_fields, true ) ? '' : ' ism-seo-length-off'; ?>"
+								data-field="<?php echo esc_attr( $ism_field_key ); ?>">
+								<th scope="row"><?php echo esc_html( $ism_field_label ); ?></th>
+								<?php foreach ( [ 'min', 'max' ] as $ism_bound ) : ?>
+									<td>
+										<input
+											type="number"
+											class="small-text ism-seo-len"
+											data-field="<?php echo esc_attr( $ism_field_key ); ?>"
+											data-bound="<?php echo esc_attr( $ism_bound ); ?>"
+											min="0"
+											max="<?php echo esc_attr( (string) $ism_ceilings[ $ism_field_key ] ); ?>"
+											step="1"
+											aria-label="<?php echo esc_attr( sprintf( '%s %s characters', $ism_field_label, $ism_bound === 'min' ? 'minimum' : 'maximum' ) ); ?>"
+											value="<?php echo esc_attr( (string) $ism_lengths[ $ism_field_key ][ $ism_bound ] ); ?>" />
+									</td>
+								<?php endforeach; ?>
+							</tr>
+						<?php endforeach; ?>
+						</tbody>
+					</table>
+					<p class="description">
+						<?php esc_html_e( '0 means no limit. Counted in characters, spaces included. The model is given the range, and every result is measured: a field that misses gets one automatic rewrite, which costs roughly one more request for that image. Anything still outside the range is flagged in review and never cut off. 125 for alt text is a common guideline, not a screen-reader limit.', 'image-size-manager' ); ?>
+					</p>
+					<p class="description ism-seo-lengths-warn" role="alert" style="display:none"></p>
 				</div>
 
 				<div class="ism-seo-estimate" id="ism-seo-estimate"></div>
