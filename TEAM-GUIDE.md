@@ -73,7 +73,9 @@ featured image, and which fields are currently empty.
 
 ### 4. Generate a small batch first — 5 min
 
-Two ways to choose what runs. Tick rows in the chart, or use **the first N
+Two ways to choose what runs. Tick rows in the chart (**Select all shown**
+ticks every row matching the filters, on every page; **Deselect all** clears
+everything, including ticks a filter is hiding), or use **the first N
 images without a proposal** — which draws from the filtered view, so narrow
 the chart to what you want first and the run follows it. The count beside it
 tells you how many that filter actually has left. **Read the output before

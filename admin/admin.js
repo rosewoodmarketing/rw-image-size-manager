@@ -1483,8 +1483,6 @@
 		var checked = 0;
 		seoGroups.forEach( function ( g ) { if ( seoChecked[ g.key ] ) { checked++; } } );
 
-		$( '.ism-seo-chart-count' ).text( vis.length + ' shown · ' + checked + ' selected' );
-		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' selected)' : '(none selected yet)' );
 		seoSyncSelectAllButton();
 		seoRenderEstimate();
 
@@ -1572,34 +1570,65 @@
 	$( document ).on( 'change', '.ism-seo-tick', function () {
 		var k = String( $( this ).data( 'key' ) );
 		if ( $( this ).is( ':checked' ) ) { seoChecked[ k ] = true; } else { delete seoChecked[ k ]; }
-		var checked = Object.keys( seoChecked ).length;
-		$( '.ism-seo-chart-count' ).text( seoVisibleGroups().length + ' shown · ' + checked + ' selected' );
-		$( '.ism-seo-selected-count' ).text( checked ? '(' + checked + ' selected)' : '(none selected yet)' );
 		seoSyncSelectAllButton();
 		seoRenderEstimate();
 	} );
 
-	// One button that reflects what it will do next, rather than two that both
-	// stay clickable when only one of them is meaningful.
+	// "Select all shown" follows the filters and search, across every page of
+	// the chart. "Deselect all" clears everything, including rows a filter is
+	// hiding, because Generate and Apply act on every ticked row whether it is
+	// on screen or not.
 	$( document ).on( 'click', '#ism-seo-check-all', function () {
-		var $btn = $( this );
-
-		if ( $btn.data( 'mode' ) === 'select' ) {
-			seoVisibleGroups().forEach( function ( g ) { seoChecked[ g.key ] = true; } );
-		} else {
-			seoVisibleGroups().forEach( function ( g ) { delete seoChecked[ g.key ]; } );
-		}
-
+		seoVisibleGroups().forEach( function ( g ) { seoChecked[ g.key ] = true; } );
 		seoRenderChart();
 	} );
 
-	function seoSyncSelectAllButton() {
-		var vis = seoVisibleGroups();
-		var all = vis.length > 0 && vis.every( function ( g ) { return seoChecked[ g.key ]; } );
+	$( document ).on( 'click', '#ism-seo-uncheck-all, #ism-seo-select-none', function () {
+		seoChecked = {};
+		$( '.ism-seo-apply-status' ).text( '' );
+		seoRenderChart();
+	} );
 
-		$( '#ism-seo-check-all' )
-			.data( 'mode', all ? 'unselect' : 'select' )
-			.text( all ? 'Unselect all' : 'Select all' );
+	// The review card's own shortcut: tick every image that has something to
+	// write, wherever it sits in the chart.
+	$( document ).on( 'click', '#ism-seo-select-all', function () {
+		var pending = seoGroups.filter( seoHasUnapplied );
+		pending.forEach( function ( g ) { seoChecked[ g.key ] = true; } );
+		$( '.ism-seo-apply-status' ).text( pending.length
+			? pending.length + ' image(s) with changes selected.'
+			: 'No images have changes to apply.' );
+		seoRenderChart();
+	} );
+
+	// One place for every selection readout and button state, so the chart
+	// toolbar, the generate card and the review card never disagree.
+	function seoSyncSelectAllButton() {
+		var vis     = seoVisibleGroups();
+		var visKeys = {};
+		vis.forEach( function ( g ) { visKeys[ g.key ] = true; } );
+
+		var checked = 0;
+		var hidden  = 0;
+		seoGroups.forEach( function ( g ) {
+			if ( ! seoChecked[ g.key ] ) { return; }
+			checked++;
+			if ( ! visKeys[ g.key ] ) { hidden++; }
+		} );
+
+		var allShown = vis.length > 0 && vis.every( function ( g ) { return seoChecked[ g.key ]; } );
+
+		$( '#ism-seo-check-all' ).prop( 'disabled', allShown || ! vis.length );
+		$( '#ism-seo-uncheck-all, #ism-seo-select-none' ).prop( 'disabled', checked === 0 );
+
+		var pending = seoGroups.filter( seoHasUnapplied );
+		$( '#ism-seo-select-all' ).prop( 'disabled',
+			! pending.length || pending.every( function ( g ) { return seoChecked[ g.key ]; } ) );
+
+		$( '.ism-seo-chart-count' ).text( vis.length + ' shown · ' + checked + ' selected'
+			+ ( hidden ? ' (' + hidden + ' hidden by the current filter)' : '' ) );
+		$( '.ism-seo-selected-count' ).text( checked
+			? '(' + checked + ' selected' + ( hidden ? ', ' + hidden + ' not shown' : '' ) + ')'
+			: '(none selected yet)' );
 	}
 
 	// Rejecting is not reviewing: the suggestion was wrong, so the image drops
@@ -1840,6 +1869,7 @@
 	function seoRenderReview() {
 		var pending = seoGroups.filter( seoHasUnapplied );
 		$( '#ism-seo-review-card' ).toggle( pending.length > 0 );
+		seoSyncSelectAllButton();
 		$( '#ism-seo-review-list' ).html( pending.length
 			? '<p class="description">' + pending.length + ' image(s) have unapplied changes. '
 				+ '<button type="button" class="button button-small ism-seo-goto-proposals">Show only these</button> '

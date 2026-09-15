@@ -79,6 +79,8 @@ A WordPress admin plugin for managing images across an entire site: image sizes 
 - The range is stated in the prompt and in the schema description (structured outputs reject `minLength`/`maxLength`), and every result is measured. A field that misses gets one automatic rewrite of that field only; anything still outside is flagged "length off" in review and never truncated. Apply asks before writing a flagged row.
 - Review fields show a live character count against the range. Cost estimates account for configured maximums.
 - An impossible range (minimum above maximum) is refused and blocks Generate when its field is ticked.
+- **Selection:** the chart toolbar now has separate **Select all shown** (every row matching the current filters, across all pages) and **Deselect all** (clears every selection, including rows a filter is hiding). The selection count reports ticked rows hidden by the filter.
+- **Bug fix:** the review card's Select all / Select none buttons did nothing. They now work as **Select all with changes** and **Deselect all**.
 
 ### 2.1.2
 - **Bug fix:** "Show only these" now clears every filter that could hide a pending row, and the count beside it matches what is shown.

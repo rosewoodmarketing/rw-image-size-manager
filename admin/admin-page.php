@@ -763,7 +763,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 						</select>
 					</label>
 					<input type="search" id="ism-seo-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename or page…', 'image-size-manager' ); ?>" />
-					<button type="button" class="button" id="ism-seo-check-all" data-mode="select"><?php esc_html_e( 'Select all', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-check-all"><?php esc_html_e( 'Select all shown', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-uncheck-all" disabled><?php esc_html_e( 'Deselect all', 'image-size-manager' ); ?></button>
 					<span class="ism-seo-chart-count"></span>
 				</div>
 
@@ -911,8 +912,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 				</p>
 
 				<div class="ism-seo-review-toolbar">
-					<button type="button" class="button" id="ism-seo-select-all"><?php esc_html_e( 'Select all', 'image-size-manager' ); ?></button>
-					<button type="button" class="button" id="ism-seo-select-none"><?php esc_html_e( 'Select none', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-select-all"><?php esc_html_e( 'Select all with changes', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-select-none"><?php esc_html_e( 'Deselect all', 'image-size-manager' ); ?></button>
 					<button type="button" class="button button-primary" id="ism-seo-apply"><?php esc_html_e( 'Apply selected', 'image-size-manager' ); ?></button>
 					<button type="button" class="button" id="ism-seo-discard"><?php esc_html_e( 'Discard proposals', 'image-size-manager' ); ?></button>
 					<span class="ism-seo-apply-status"></span>
