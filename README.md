@@ -1,6 +1,6 @@
 # RW Image Manager
 
-**Version:** 2.2.0  
+**Version:** 2.2.1  
 **Requires PHP:** 7.4+  
 **Author:** Anthony Burkholder  
 **License:** GPL-2.0+  
@@ -73,6 +73,10 @@ A WordPress admin plugin for managing images across an entire site: image sizes 
 ---
 
 ## Changelog
+
+### 2.2.1
+- **Infrastructure:** Update checks now run through Rosewood License Manager (`webdev.rosewood.us.com`) using slug + site URL for this plugin mapping. The plugin no longer exposes a client-side License key field.
+- **Release automation:** Added a GitHub Actions workflow to build and attach `rw-image-size-manager.zip` to published releases automatically, ensuring the hub can always locate a release asset.
 
 ### 2.2.0
 - **New feature:** Minimum and maximum character counts for generated titles, alt text and descriptions, set beside the field checkboxes on the Image SEO tab. 0 means no limit. Defaults match the previous guidance (title 60, alt text 125, description unlimited).
