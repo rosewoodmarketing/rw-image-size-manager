@@ -1,0 +1,25 @@
+name: Build and attach release zip
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Build plugin zip
+        run: git archive --format=zip --prefix=rw-image-size-manager/ -o rw-image-size-manager.zip HEAD
+
+      - name: Upload zip to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" rw-image-size-manager.zip --clobber

@@ -1,0 +1,8 @@
+/.github export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+
+includes/plugin-update-checker/.editorconfig export-ignore
+includes/plugin-update-checker/.gitattributes export-ignore
+includes/plugin-update-checker/.gitignore export-ignore
+includes/plugin-update-checker/README.md export-ignore

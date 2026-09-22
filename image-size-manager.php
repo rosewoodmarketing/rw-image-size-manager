@@ -19,13 +19,13 @@ define( 'ISM_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'ISM_OPTION_KEY',  'ism_settings' );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GitHub Updater — checks for new releases and surfaces them in WP Admin > Updates
-// Change these two constants if you rename the GitHub repo or transfer ownership.
+// Rosewood License Manager (RWLM) updater via hub
 // ─────────────────────────────────────────────────────────────────────────────
-define( 'ISM_GITHUB_USER', 'rosewoodmarketing' );
-define( 'ISM_GITHUB_REPO', 'rw-image-size-manager' );
+define( 'ISM_RWLM_PLUGIN_SLUG', 'rw-image-size-manager' );
+define( 'ISM_RWLM_HUB_URL', 'https://webdev.rosewood.us.com' );
 
-require_once ISM_PLUGIN_DIR . 'includes/class-ism-github-updater.php';
+require_once __DIR__ . '/includes/plugin-update-checker/plugin-update-checker.php';
+require_once __DIR__ . '/includes/class-ism-hub-updater.php';
 require_once ISM_PLUGIN_DIR . 'includes/ajax-handlers.php';
 require_once ISM_PLUGIN_DIR . 'includes/usage-index.php';
 require_once ISM_PLUGIN_DIR . 'includes/context-builder.php';
@@ -37,14 +37,14 @@ require_once ISM_PLUGIN_DIR . 'includes/broken-images.php';
 require_once ISM_PLUGIN_DIR . 'includes/broken-repoint.php';
 
 if ( is_admin() ) {
-	new ISM_GitHub_Updater( __FILE__, ISM_GITHUB_USER, ISM_GITHUB_REPO );
+	new ISM_Hub_Updater( __FILE__, ISM_RWLM_PLUGIN_SLUG, ISM_RWLM_HUB_URL );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bootstrap
 // ─────────────────────────────────────────────────────────────────────────────
 
-add_action( 'admin_menu',           'ism_add_admin_menu' );
+add_action( 'admin_menu',           'ism_add_admin_menu', 5 );
 add_action( 'admin_menu', function() {
 	add_submenu_page(
 		'image-size-manager',
