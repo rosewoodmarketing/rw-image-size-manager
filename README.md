@@ -1,12 +1,15 @@
-# RW Image Size Manager
+# RW Image Manager
 
-**Version:** 1.3.0  
+**Version:** 2.2.0  
+**Requires PHP:** 7.4+  
 **Author:** Anthony Burkholder  
 **License:** GPL-2.0+  
 **Requires WordPress:** 6.0+  
 **Tested up to:** 6.9  
 
-A WordPress admin plugin for viewing, toggling, and customizing image sizes across the entire site — including per-post-type allowlists, custom size registration, original-upload dimension limits, thumbnail regeneration, a media log, and an orphaned-file scanner.
+A WordPress admin plugin for managing images across an entire site: image sizes and per-post-type allowlists, custom size registration, original-upload dimension limits, thumbnail regeneration, a media log, an orphaned-file scanner, and — from 2.0.0 — page-context-aware AI generation of image titles, alt text and descriptions, duplicate review, and broken-image detection and repair.
+
+**Team workflow guide:** see [TEAM-GUIDE.md](TEAM-GUIDE.md) for the end-to-end process.
 
 ---
 
@@ -64,11 +67,39 @@ A WordPress admin plugin for viewing, toggling, and customizing image sizes acro
 
 1. Upload the `rw-image-size-manager` folder to `wp-content/plugins/`.
 2. Activate the plugin through **Plugins → Installed Plugins**.
-3. Navigate to **Image Sizes** in the WordPress admin sidebar.
+3. Navigate to **RW Image Manager** in the WordPress admin sidebar.
+4. For AI generation only: add an Anthropic API key under **Image SEO**. Everything else works without one.
 
 ---
 
 ## Changelog
+
+### 2.2.0
+- **New feature:** Minimum and maximum character counts for generated titles, alt text and descriptions, set beside the field checkboxes on the Image SEO tab. 0 means no limit. Defaults match the previous guidance (title 60, alt text 125, description unlimited).
+- The range is stated in the prompt and in the schema description (structured outputs reject `minLength`/`maxLength`), and every result is measured. A field that misses gets one automatic rewrite of that field only; anything still outside is flagged "length off" in review and never truncated. Apply asks before writing a flagged row.
+- Review fields show a live character count against the range. Cost estimates account for configured maximums.
+- An impossible range (minimum above maximum) is refused and blocks Generate when its field is ticked.
+- **Selection:** the chart toolbar now has separate **Select all shown** (every row matching the current filters, across all pages) and **Deselect all** (clears every selection, including rows a filter is hiding). The selection count reports ticked rows hidden by the filter.
+- **Bug fix:** the review card's Select all / Select none buttons did nothing. They now work as **Select all with changes** and **Deselect all**.
+
+### 2.1.2
+- **Bug fix:** "Show only these" now clears every filter that could hide a pending row, and the count beside it matches what is shown.
+
+### 2.1.1
+- **Improvement:** "The first N images without a proposal" draws from the current filtered view.
+
+### 2.1.0
+- **New feature:** Choose which fields generation writes. Title and alt text are on by default; description is off, since most themes never render it. Unticked fields are not requested and cost nothing.
+
+### 2.0.0
+- **Renamed** to RW Image Manager (display name only; slug, directory and `ism_` prefix unchanged so updates keep working).
+- **New feature:** Image SEO tab. Page-context-aware AI generation of titles, alt text and descriptions via the Anthropic API, with a usage index mapping every image to the pages, templates and custom fields (ACF postmeta and termmeta) that reference it. Scan, generate, review and apply; nothing is written without an explicit click. The API key is optional; every other feature works without it.
+- **New feature:** Advanced AI settings: extra instructions, source weighting, and a per-run cost estimate.
+- **New feature:** Read-only duplicate review, grouping byte-identical copies.
+- **New feature:** Broken Images tab: finds references to deleted attachments and missing files, triages likely-harmless leftovers, and repairs one reference at a time across post markup, Elementor data and ACF fields.
+- **AVIF:** images the host cannot decode are converted in the browser; readable pre-conversion siblings are used when present.
+- **Bug fix:** Bulk Resize and Remove -scaled Images now repoint page references before moving files, not only the media library.
+- Team workflow guide added: [TEAM-GUIDE.md](TEAM-GUIDE.md).
 
 ### 1.3.0 — 2026-05-20
 - **New feature:** Added **Regenerate All Images** in the Advanced tab. This processes the entire media library in batches, regenerates current sizes for every image, and deletes old thumbnail files that are no longer needed.

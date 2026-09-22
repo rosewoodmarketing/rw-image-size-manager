@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name:       RW Image Size Manager
+ * Plugin Name:       RW Image Manager
  * Plugin URI:        https://github.com/rosewoodmarketing/rw-image-size-manager
- * Description:       View, toggle, customize, and add image sizes. Per-post-type size allowlists, max upload dimensions, bulk thumbnail regeneration, a media log, and an orphaned-file scanner.
- * Version:           1.3.0
+ * Description:       Image sizes, bulk regeneration and upload limits, plus page-context-aware AI titles, alt text and descriptions, duplicate review, and broken-image repair.
+ * Version:           2.2.0
  * Author:            Anthony Burkholder
  * License:           GPL-2.0+
  * Text Domain:       image-size-manager
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ISM_VERSION',     '1.3.0' );
+define( 'ISM_VERSION',     '2.2.0' );
 define( 'ISM_PLUGIN_DIR',  plugin_dir_path( __FILE__ ) );
 define( 'ISM_PLUGIN_URL',  plugin_dir_url( __FILE__ ) );
 define( 'ISM_OPTION_KEY',  'ism_settings' );
@@ -27,6 +27,14 @@ define( 'ISM_GITHUB_REPO', 'rw-image-size-manager' );
 
 require_once ISM_PLUGIN_DIR . 'includes/class-ism-github-updater.php';
 require_once ISM_PLUGIN_DIR . 'includes/ajax-handlers.php';
+require_once ISM_PLUGIN_DIR . 'includes/usage-index.php';
+require_once ISM_PLUGIN_DIR . 'includes/context-builder.php';
+require_once ISM_PLUGIN_DIR . 'includes/image-source.php';
+require_once ISM_PLUGIN_DIR . 'includes/ai-client.php';
+require_once ISM_PLUGIN_DIR . 'includes/file-hash.php';
+require_once ISM_PLUGIN_DIR . 'includes/seo-ajax.php';
+require_once ISM_PLUGIN_DIR . 'includes/broken-images.php';
+require_once ISM_PLUGIN_DIR . 'includes/broken-repoint.php';
 
 if ( is_admin() ) {
 	new ISM_GitHub_Updater( __FILE__, ISM_GITHUB_USER, ISM_GITHUB_REPO );
@@ -83,6 +91,36 @@ add_action( 'wp_ajax_ism_bulk_resize_init',   'ism_ajax_bulk_resize_init' );
 add_action( 'wp_ajax_ism_bulk_resize_batch',  'ism_ajax_bulk_resize_batch' );
 add_action( 'wp_ajax_ism_descale_init',       'ism_ajax_descale_init' );
 add_action( 'wp_ajax_ism_descale_batch',      'ism_ajax_descale_batch' );
+
+// AJAX: Image SEO tab — scan, generate one image, apply reviewed rows
+add_action( 'wp_ajax_ism_seo_scan_init',  'ism_ajax_seo_scan_init' );
+add_action( 'wp_ajax_ism_seo_scan_batch', 'ism_ajax_seo_scan_batch' );
+add_action( 'wp_ajax_ism_seo_generate',   'ism_ajax_seo_generate' );
+add_action( 'wp_ajax_ism_seo_apply',      'ism_ajax_seo_apply' );
+add_action( 'wp_ajax_ism_seo_reset',      'ism_ajax_seo_reset' );
+add_action( 'wp_ajax_ism_hash_batch',     'ism_ajax_hash_batch' );
+add_action( 'wp_ajax_ism_seo_review',     'ism_ajax_seo_review' );
+add_action( 'wp_ajax_ism_seo_reject',     'ism_ajax_seo_reject' );
+add_action( 'wp_ajax_ism_ai_clear_key',   'ism_ajax_ai_clear_key' );
+add_action( 'wp_ajax_ism_seo_save_advanced', 'ism_ajax_seo_save_advanced' );
+add_action( 'wp_ajax_ism_seo_save_fields', 'ism_ajax_seo_save_fields' );
+add_action( 'wp_ajax_ism_seo_save_lengths', 'ism_ajax_seo_save_lengths' );
+add_action( 'wp_ajax_ism_seo_duplicates', 'ism_ajax_seo_duplicates' );
+
+// AJAX: Broken Images tab — detection and match suggestion. No repoint path
+// exists yet, deliberately: rewriting Elementor JSON and ACF meta correctly is
+// its own problem and is being built separately.
+add_action( 'wp_ajax_ism_broken_init',    'ism_ajax_broken_init' );
+add_action( 'wp_ajax_ism_broken_batch',   'ism_ajax_broken_batch' );
+add_action( 'wp_ajax_ism_broken_suggest', 'ism_ajax_broken_suggest' );
+add_action( 'wp_ajax_ism_broken_choose',  'ism_ajax_broken_choose' );
+add_action( 'wp_ajax_ism_repoint_preview', 'ism_ajax_repoint_preview' );
+add_action( 'wp_ajax_ism_repoint_apply',   'ism_ajax_repoint_apply' );
+add_action( 'wp_ajax_ism_broken_verify',   'ism_ajax_broken_verify' );
+
+// AJAX: usage index build (Image SEO tab depends on it)
+add_action( 'wp_ajax_ism_usage_index_init',  'ism_ajax_usage_index_init' );
+add_action( 'wp_ajax_ism_usage_index_batch', 'ism_ajax_usage_index_batch' );
 
 // AJAX: image size usage scanner (read-only — uses its own nonce action)
 add_action( 'wp_ajax_ism_size_usage_scan',    'ism_ajax_size_usage_scan' );
@@ -740,9 +778,13 @@ function ism_regen_attachment( int $attachment_id, string $cpt_key ) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ism_add_admin_menu(): void {
+	// Display text only. The menu slug, directory name, ism_ prefix and ISM_
+	// constants stay as they are — those are how WordPress matches an installed
+	// plugin to an update, and renaming them would strand every site already
+	// receiving updates through the GitHub updater.
 	add_menu_page(
-		__( 'Image Sizes', 'image-size-manager' ),
-		__( 'Image Sizes', 'image-size-manager' ),
+		__( 'RW Image Manager', 'image-size-manager' ),
+		__( 'RW Image Manager', 'image-size-manager' ),
 		'manage_options',
 		'image-size-manager',
 		'ism_render_admin_page',
@@ -765,6 +807,9 @@ function ism_enqueue_assets( string $hook ): void {
 		[],
 		ISM_VERSION
 	);
+	// The Broken Images tab offers the core media modal as a manual picker.
+	wp_enqueue_media();
+
 	wp_enqueue_script(
 		'ism-admin',
 		ISM_PLUGIN_URL . 'admin/admin.js',
@@ -780,6 +825,10 @@ function ism_enqueue_assets( string $hook ): void {
 		'maxUploadWidth' => (int) ism_get_settings()['max_upload_width'],
 		'maxUploadHeight'=> (int) ism_get_settings()['max_upload_height'],
 		'sizeUsageNonce' => wp_create_nonce( 'ism_size_usage_scan' ),
+		'adminUrl'       => admin_url(),
+		'seoNonce'       => wp_create_nonce( 'ism_seo' ),
+		'usageIndexNonce'=> wp_create_nonce( 'ism_usage_index' ),
+		// Deliberately absent: the API key. It is never sent to the browser.
 	] );
 }
 
@@ -800,8 +849,10 @@ function ism_register_settings(): void {
 /**
  * Suppress WordPress's built-in big-image ( -scaled ) behaviour when the plugin
  * has its own max-upload dimensions configured.
+ *
+ * @return int|false
  */
-function ism_big_image_threshold( int $threshold ): int|false {
+function ism_big_image_threshold( int $threshold ) {
 	$s     = ism_get_settings();
 	$max_w = (int) $s['max_upload_width'];
 	$max_h = (int) $s['max_upload_height'];
@@ -925,6 +976,32 @@ function ism_handle_save(): void {
 			'allowed_sizes'    => $allowed,
 			'delete_images'    => ! empty( $rule['delete_images'] ) ? '1' : '0',
 		];
+	}
+
+	// ── Generation model and context budget ─────────────────────────────────
+	$submitted_model = sanitize_text_field( wp_unslash( $_POST['ism_ai_model'] ?? '' ) );
+	$settings['ai_model'] = isset( ism_ai_models()[ $submitted_model ] ) ? $submitted_model : '';
+
+	// Clamped rather than rejected: a silly number should land somewhere sane,
+	// not fail the whole save.
+	$settings['context_max_chars'] = min( 20000, max( 100, (int) ( $_POST['ism_context_max_chars'] ?? ISM_CONTEXT_MAX_CHARS ) ) );
+
+	// ── Advanced generation settings ────────────────────────────────────────
+	$settings['ai_extra_prompt'] = sanitize_textarea_field( wp_unslash( $_POST['ism_ai_extra_prompt'] ?? '' ) );
+
+	$submitted_weights = (array) ( $_POST['ism_ai_weights'] ?? [] );
+	if ( ! empty( $submitted_weights ) ) {
+		$settings['ai_weights'] = ism_ai_normalise_weights( array_map( 'intval', $submitted_weights ) );
+	}
+
+	// ── Anthropic API key ────────────────────────────────────────────────────
+	// Stored by ism_ai_set_key() in its own option with autoload off, never in
+	// $settings — ism_get_settings() is partially passed to wp_localize_script().
+	// The field renders empty even when a key is stored, so an empty submission
+	// means "leave it alone". Removing a key is a button, handled over AJAX.
+	$submitted_key = trim( (string) wp_unslash( $_POST['ism_api_key'] ?? '' ) );
+	if ( $submitted_key !== '' ) {
+		ism_ai_set_key( sanitize_text_field( $submitted_key ) );
 	}
 
 	// ── Max upload dimensions ────────────────────────────────────────────────

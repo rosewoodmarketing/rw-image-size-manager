@@ -503,6 +503,23 @@ function ism_ajax_bulk_resize_batch(): void {
 		// If we resized the original in place of a -scaled copy, repoint
 		// _wp_attached_file to the original and delete the stale -scaled file.
 		if ( $scaled_file ) {
+			// Every page that already inserted the -scaled URL has to follow the
+			// file, or it is left pointing at something this loop is about to
+			// delete. Repointing the media library alone is what silently broke
+			// images on the pilot site: the row moved, the pages did not.
+			$repointed = ism_repoint_after_file_move( $att_id, $scaled_file, $file );
+			if ( $repointed['content'] || $repointed['elementor'] ) {
+				$messages[] = [
+					'type' => 'ok',
+					'text' => sprintf(
+						'%s: repointed %d reference(s) across %d page(s)',
+						$filename,
+						$repointed['content'] + $repointed['elementor'],
+						count( $repointed['posts'] )
+					),
+				];
+			}
+
 			$relative = _wp_relative_upload_path( $file );
 			if ( $relative ) {
 				update_post_meta( $att_id, '_wp_attached_file', $relative );
@@ -687,6 +704,24 @@ function ism_ajax_descale_batch(): void {
 		wp_update_attachment_metadata( $att_id, $meta );
 
 		// Repoint _wp_attached_file too.
+		// Same reasoning as the bulk resize path: pages holding the -scaled URL
+		// must follow the file before it is unlinked below, or this tool deletes
+		// a file that live content still points at.
+		if ( $real_scaled && $real_scaled !== $real_original ) {
+			$repointed = ism_repoint_after_file_move( $att_id, $real_scaled, $real_original );
+			if ( $repointed['content'] || $repointed['elementor'] ) {
+				$messages[] = [
+					'type' => 'ok',
+					'text' => sprintf(
+						'%s: repointed %d reference(s) across %d page(s)',
+						basename( $original_rel ),
+						$repointed['content'] + $repointed['elementor'],
+						count( $repointed['posts'] )
+					),
+				];
+			}
+		}
+
 		update_post_meta( $att_id, '_wp_attached_file', $original_rel );
 
 		// Keep attachment mime in sync with the repointed file.

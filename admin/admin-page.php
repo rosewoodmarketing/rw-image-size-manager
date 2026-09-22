@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 ?>
 <div class="wrap ism-wrap">
-	<h1><?php esc_html_e( 'RW Image Size Manager', 'image-size-manager' ); ?></h1>
+	<h1><?php esc_html_e( 'RW Image Manager', 'image-size-manager' ); ?></h1>
 
 	<?php if ( $saved ) : ?>
 		<div class="notice notice-success is-dismissible">
@@ -40,6 +40,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<?php endif; ?>
 			<button type="button" class="ism-tab" data-target="ism-panel-media-log">
 				<?php esc_html_e( 'Media Log', 'image-size-manager' ); ?>
+			</button>
+			<button type="button" class="ism-tab" data-target="ism-panel-seo">
+				<?php esc_html_e( 'Image SEO', 'image-size-manager' ); ?>
+			</button>
+			<button type="button" class="ism-tab" data-target="ism-panel-broken">
+				<?php esc_html_e( 'Broken Images', 'image-size-manager' ); ?>
 			</button>
 			<button type="button" class="ism-tab ism-tab-advanced" data-target="ism-panel-advanced">
 				<?php esc_html_e( 'Advanced', 'image-size-manager' ); ?>
@@ -477,6 +483,507 @@ if ( ! defined( 'ABSPATH' ) ) {
 		</div><!-- /ism-panel-media-log -->
 
 		<!-- ═══════════════════════════════════════════════════════════════════
+		     PANEL – IMAGE SEO
+		     ══════════════════════════════════════════════════════════════════ -->
+		<?php
+		$ism_has_key      = ism_ai_has_key();
+		$ism_index_status = ism_usage_index_status();
+		$ism_index_built  = (bool) $ism_index_status['built_at'];
+		?>
+		<div id="ism-panel-seo" class="ism-panel" hidden>
+
+			<div class="ism-card">
+				<h2><?php esc_html_e( 'Image SEO', 'image-size-manager' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'Audit and populate image titles, alt text and descriptions, using the pages each image actually appears on as context. Everything except generation works without an API key.', 'image-size-manager' ); ?>
+				</p>
+			</div>
+
+			<!-- API key ─────────────────────────────────────────────────── -->
+			<div class="ism-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Anthropic API Key', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Required only for generation. Stored in its own option and never sent to the browser. Leave blank to keep the existing key.', 'image-size-manager' ); ?>
+				</p>
+				<p>
+					<input type="password" name="ism_api_key" class="regular-text" autocomplete="off"
+						placeholder="<?php echo esc_attr( $ism_has_key ? __( 'A key is saved — leave blank to keep it', 'image-size-manager' ) : 'sk-ant-…' ); ?>" />
+					<span class="ism-key-state">
+						<?php if ( $ism_has_key ) : ?>
+							<span style="color:#1d7e2d;font-weight:500"><?php esc_html_e( '✓ Key saved', 'image-size-manager' ); ?></span>
+						<?php else : ?>
+							<span style="color:#996800;font-weight:500"><?php esc_html_e( 'No key — generation disabled', 'image-size-manager' ); ?></span>
+						<?php endif; ?>
+					</span>
+				</p>
+				<p class="ism-key-actions" <?php echo $ism_has_key ? '' : 'style="display:none"'; ?>>
+					<button type="button" class="button button-link-delete" id="ism-remove-key">
+						<?php esc_html_e( 'Remove stored key', 'image-size-manager' ); ?>
+					</button>
+					<span class="ism-key-remove-status description"></span>
+				</p>
+			</div>
+
+			<!-- Generation settings ─────────────────────────────────────── -->
+			<div class="ism-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Generation Settings', 'image-size-manager' ); ?></h4>
+
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><label for="ism-ai-model"><?php esc_html_e( 'Model', 'image-size-manager' ); ?></label></th>
+						<td>
+							<?php $ism_current_model = ism_ai_get_model(); ?>
+							<select name="ism_ai_model" id="ism-ai-model">
+								<?php foreach ( ism_ai_models() as $ism_mid => $ism_m ) : ?>
+									<option value="<?php echo esc_attr( $ism_mid ); ?>" <?php selected( $ism_current_model, $ism_mid ); ?>>
+										<?php
+										printf(
+											'%s — about $%s per 100 images',
+											esc_html( $ism_m['label'] ),
+											esc_html( number_format( ism_ai_cost_per_100( $ism_mid ), 2 ) )
+										);
+										?>
+									</option>
+								<?php endforeach; ?>
+							</select>
+							<?php foreach ( ism_ai_models() as $ism_mid => $ism_m ) : ?>
+								<p class="description ism-model-note" data-model="<?php echo esc_attr( $ism_mid ); ?>"
+									<?php echo $ism_current_model === $ism_mid ? '' : 'style="display:none"'; ?>>
+									<?php echo esc_html( $ism_m['note'] ); ?>
+									<br>
+									<?php
+									printf(
+										/* translators: 1: input price, 2: output price */
+										esc_html__( 'Billed at $%1$s per million tokens you send and $%2$s per million it writes back. A typical image sends about 700 and gets back about 150.', 'image-size-manager' ),
+										esc_html( number_format( $ism_m['in'], 2 ) ),
+										esc_html( number_format( $ism_m['out'], 2 ) )
+									);
+									?>
+								</p>
+							<?php endforeach; ?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="ism-context-max-chars"><?php esc_html_e( 'Page context', 'image-size-manager' ); ?></label></th>
+						<td>
+							<input type="number" name="ism_context_max_chars" id="ism-context-max-chars" class="small-text"
+								min="100" max="20000" step="100"
+								value="<?php echo esc_attr( (string) ism_context_max_chars() ); ?>" />
+							<?php esc_html_e( 'characters', 'image-size-manager' ); ?>
+							<p class="description">
+								<?php esc_html_e( 'Total budget for page text across every page an image appears on. Every page is always named in the prompt; this controls how much of their body copy is included. Spent in relevance order — a page using the image as its featured image goes first, then body and builder content, then custom fields, with header and footer templates last.', 'image-size-manager' ); ?>
+							</p>
+							<p class="description">
+								<?php esc_html_e( 'More context costs more per image. 1000 is a reasonable start; raise it if output reads generic.', 'image-size-manager' ); ?>
+							</p>
+						</td>
+					</tr>
+				</table>
+
+				<p>
+					<button type="button" class="button" id="ism-advanced-toggle" aria-expanded="false">
+						<?php esc_html_e( 'Advanced AI settings', 'image-size-manager' ); ?>
+						<span class="ism-advanced-caret">▸</span>
+					</button>
+				</p>
+
+				<?php
+				$ism_weights = ism_ai_get_weights();
+				$ism_labels  = [
+					'image'    => __( 'Looking at the image itself', 'image-size-manager' ),
+					'prompt'   => __( 'Your instructions and keywords', 'image-size-manager' ),
+					'context'  => __( 'The pages the image appears on', 'image-size-manager' ),
+					'metadata' => __( 'Existing title, alt text and caption', 'image-size-manager' ),
+				];
+				$ism_hints = [
+					'image'    => __( 'What is actually visible. Set to 0 to describe without looking — much cheaper, and usually much worse.', 'image-size-manager' ),
+					'prompt'   => __( 'Only counts if you write something below. 0 ignores it entirely.', 'image-size-manager' ),
+					'context'  => __( 'Page titles, keywords and body copy from every page using this image.', 'image-size-manager' ),
+					'metadata' => __( 'Lets generation improve on what is there rather than ignore it.', 'image-size-manager' ),
+				];
+				?>
+				<div id="ism-advanced-panel" class="ism-advanced-panel" hidden>
+
+					<p class="description ism-advanced-explainer">
+						<?php esc_html_e( 'These percentages do two things. A source set to 0 is left out of the request completely — no image sent, no page context, no existing metadata. The remaining shares are turned into an explicit instruction telling the model which source to trust when they disagree. They are priorities and an on/off switch, not a calibrated attention dial.', 'image-size-manager' ); ?>
+					</p>
+
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Extra instructions', 'image-size-manager' ); ?></th>
+							<td>
+								<textarea name="ism_ai_extra_prompt" id="ism-ai-extra-prompt" rows="4" class="large-text"
+									placeholder="<?php esc_attr_e( 'e.g. This is a metal roofing supplier. Prefer product names like Standing Seam, Board &amp; Batten, 5-V Crimp. Never guess a colour name you cannot clearly see.', 'image-size-manager' ); ?>"><?php echo esc_textarea( ism_ai_get_extra_prompt() ); ?></textarea>
+								<p class="description">
+									<?php esc_html_e( 'Added to every request, after the page context. Good for house vocabulary, product naming, or things the model keeps getting wrong. Leave blank to send nothing.', 'image-size-manager' ); ?>
+								</p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><?php esc_html_e( 'Source weighting', 'image-size-manager' ); ?></th>
+							<td>
+								<table class="ism-weights">
+									<?php foreach ( $ism_weights as $ism_wk => $ism_wv ) : ?>
+									<tr>
+										<td class="ism-weight-label">
+											<label for="ism-weight-<?php echo esc_attr( $ism_wk ); ?>"><?php echo esc_html( $ism_labels[ $ism_wk ] ); ?></label>
+											<span class="description"><?php echo esc_html( $ism_hints[ $ism_wk ] ); ?></span>
+										</td>
+										<td class="ism-weight-input">
+											<input type="range" class="ism-weight-range" data-weight="<?php echo esc_attr( $ism_wk ); ?>"
+												min="0" max="100" step="5" value="<?php echo esc_attr( (string) $ism_wv ); ?>" />
+											<input type="number" class="small-text ism-weight-number"
+												id="ism-weight-<?php echo esc_attr( $ism_wk ); ?>"
+												name="ism_ai_weights[<?php echo esc_attr( $ism_wk ); ?>]"
+												data-weight="<?php echo esc_attr( $ism_wk ); ?>"
+												min="0" max="100" value="<?php echo esc_attr( (string) $ism_wv ); ?>" />%
+										</td>
+									</tr>
+									<?php endforeach; ?>
+									<tr class="ism-weight-total-row">
+										<td class="ism-weight-label"><strong><?php esc_html_e( 'Total', 'image-size-manager' ); ?></strong></td>
+										<td class="ism-weight-input">
+											<strong class="ism-weight-total">100</strong>%
+											<span class="ism-weight-error" role="alert"></span>
+										</td>
+									</tr>
+								</table>
+								<p>
+									<button type="button" class="button" id="ism-advanced-reset"><?php esc_html_e( 'Reset to defaults', 'image-size-manager' ); ?></button>
+									<button type="button" class="button" id="ism-advanced-save"><?php esc_html_e( 'Save as default', 'image-size-manager' ); ?></button>
+									<span class="ism-advanced-save-status description"></span>
+								</p>
+								<p class="description">
+									<?php esc_html_e( 'Changes apply to the next Generate immediately. Saving only decides what these boxes start at next visit.', 'image-size-manager' ); ?>
+								</p>
+							</td>
+						</tr>
+					</table>
+				</div>
+			</div>
+
+			<!-- Usage index ─────────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Step 1 — Build the usage index', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Maps every image to the pages, templates and custom fields that reference it. Generation uses that page text as context, so this must run first. No API key needed.', 'image-size-manager' ); ?>
+				</p>
+				<p class="description ism-index-state">
+					<?php if ( $ism_index_built ) : ?>
+						<span style="color:#1d7e2d;font-weight:500">
+						<?php
+						printf(
+							/* translators: 1: post count, 2: attachment count, 3: human-readable time difference */
+							esc_html__( '✓ Indexed %1$d posts, %2$d images — built %3$s ago', 'image-size-manager' ),
+							(int) $ism_index_status['posts_indexed'],
+							(int) $ism_index_status['attachments_found'],
+							esc_html( human_time_diff( (int) $ism_index_status['built_at'] ) )
+						);
+						?>
+						</span>
+					<?php else : ?>
+						<span style="color:#996800;font-weight:500"><?php esc_html_e( 'Not built yet.', 'image-size-manager' ); ?></span>
+					<?php endif; ?>
+				</p>
+				<div class="ism-regen-controls">
+					<button type="button" class="button" id="ism-usage-index-start">
+						<?php echo $ism_index_built
+							? esc_html__( 'Rebuild index', 'image-size-manager' )
+							: esc_html__( 'Build index', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-usage-index-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-usage-index-bar"></div></div>
+					<p class="ism-progress-status" id="ism-usage-index-status"></p>
+				</div>
+			</div>
+
+			<!-- Scan ────────────────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<h4><?php esc_html_e( 'Step 2 — Scan the library', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Sorts every image into what can be generated for, what should be reviewed by hand, and what appears on no page. Read-only; no API key needed.', 'image-size-manager' ); ?>
+				</p>
+				<p class="description ism-seo-scan-state"></p>
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-seo-scan-start">
+						<?php esc_html_e( 'Load chart', 'image-size-manager' ); ?>
+					</button>
+					<button type="button" class="button" id="ism-seo-rescan">
+						<?php esc_html_e( 'Rescan library', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-seo-scan-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-seo-scan-bar"></div></div>
+					<p class="ism-progress-status" id="ism-seo-scan-status"></p>
+				</div>
+				<div id="ism-seo-summary" class="ism-seo-summary" style="display:none"></div>
+			</div>
+
+			<!-- The chart ───────────────────────────────────────────────── -->
+			<div class="ism-card" id="ism-seo-chart-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Image usage chart', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Every image and every place it appears. Duplicate files are folded into one row — generate once and it applies to all copies. Tick the images you want proposals for, or use the bulk control above the table.', 'image-size-manager' ); ?>
+				</p>
+
+				<div class="ism-seo-chart-toolbar">
+<label>
+						<?php esc_html_e( 'Images', 'image-size-manager' ); ?>
+						<select id="ism-seo-filter">
+							<option value="usable"><?php esc_html_e( 'On the site (excluding decorative)', 'image-size-manager' ); ?></option>
+							<option value="skipped"><?php esc_html_e( 'Decorative / unsupported', 'image-size-manager' ); ?></option>
+							<option value="unused"><?php esc_html_e( 'Not found on any page', 'image-size-manager' ); ?></option>
+							<option value="all"><?php esc_html_e( 'All images', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<label>
+						<?php esc_html_e( 'Review', 'image-size-manager' ); ?>
+						<select id="ism-seo-review-filter">
+							<option value="unreviewed"><?php esc_html_e( 'Unreviewed', 'image-size-manager' ); ?></option>
+							<option value="reviewed"><?php esc_html_e( 'Reviewed', 'image-size-manager' ); ?></option>
+							<option value="all"><?php esc_html_e( 'All', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<label>
+						<?php esc_html_e( 'Proposals', 'image-size-manager' ); ?>
+						<select id="ism-seo-proposal-filter">
+							<option value="all"><?php esc_html_e( 'All', 'image-size-manager' ); ?></option>
+							<option value="proposals"><?php esc_html_e( 'Current proposals only', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<label>
+						<?php esc_html_e( 'Metadata', 'image-size-manager' ); ?>
+						<select id="ism-seo-metadata-filter">
+							<option value="all"><?php esc_html_e( 'All', 'image-size-manager' ); ?></option>
+							<option value="any"><?php esc_html_e( 'Missing any field', 'image-size-manager' ); ?></option>
+							<option value="alt_text"><?php esc_html_e( 'Missing alt text', 'image-size-manager' ); ?></option>
+							<option value="description"><?php esc_html_e( 'Missing description', 'image-size-manager' ); ?></option>
+							<option value="complete"><?php esc_html_e( 'Nothing missing', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<input type="search" id="ism-seo-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename or page…', 'image-size-manager' ); ?>" />
+					<button type="button" class="button" id="ism-seo-check-all"><?php esc_html_e( 'Select all shown', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-uncheck-all" disabled><?php esc_html_e( 'Deselect all', 'image-size-manager' ); ?></button>
+					<span class="ism-seo-chart-count"></span>
+				</div>
+
+				<div class="ism-seo-pager ism-seo-pager-top"></div>
+				<div id="ism-seo-chart"></div>
+				<div class="ism-seo-pager ism-seo-pager-bottom"></div>
+			</div>
+
+			<!-- Duplicate review (read-only) ────────────────────────────── -->
+			<div class="ism-card" id="ism-seo-dupe-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Duplicate review', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Attachments that are byte-identical copies of each other. This panel is read-only — nothing here deletes, trashes, merges or repoints anything. It exists so you can see what each copy is and what still points at it before deciding anything.', 'image-size-manager' ); ?>
+				</p>
+
+				<p>
+					<button type="button" class="button" id="ism-dupe-toggle" aria-expanded="false">
+						<?php esc_html_e( 'Show duplicate review', 'image-size-manager' ); ?>
+						<span class="ism-advanced-caret">▸</span>
+					</button>
+					<span class="ism-dupe-status description"></span>
+				</p>
+
+				<div id="ism-dupe-panel" hidden>
+					<div class="ism-dupe-summary"></div>
+					<div id="ism-dupe-list"></div>
+					<p class="ism-dupe-note">
+						<?php esc_html_e( 'To remove a redundant copy, use Trash from its own edit screen after confirming nothing above still needs it.', 'image-size-manager' ); ?>
+					</p>
+				</div>
+			</div>
+
+			<!-- Generate ────────────────────────────────────────────────── -->
+			<div class="ism-card ism-bulk-card" id="ism-seo-generate-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Step 3 — Generate proposals', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Runs only over the generatable group. Nothing is written to the media library — every result lands in the review table below for you to edit and approve.', 'image-size-manager' ); ?>
+				</p>
+
+				<?php if ( ! $ism_has_key ) : ?>
+					<p class="description" style="color:#996800;font-weight:500">
+						<?php esc_html_e( 'Add an API key above and save to enable generation.', 'image-size-manager' ); ?>
+					</p>
+				<?php endif; ?>
+
+				<p>
+					<label style="display:block;margin-bottom:6px">
+						<input type="radio" name="ism_seo_mode" value="selected" checked />
+						<?php esc_html_e( 'Only the images I ticked in the chart', 'image-size-manager' ); ?>
+						<span class="ism-seo-selected-count description"></span>
+					</label>
+					<label style="display:block">
+						<input type="radio" name="ism_seo_mode" value="first" />
+						<?php esc_html_e( 'The first', 'image-size-manager' ); ?>
+						<input type="number" id="ism-seo-limit" class="small-text" value="20" min="1" max="2000" />
+						<?php esc_html_e( 'images without a proposal, from the current filter', 'image-size-manager' ); ?>
+						<span class="ism-seo-first-count description"></span>
+					</label>
+					<span class="description" style="display:block;margin-top:6px">
+						<?php esc_html_e( 'Follows the filters and search above — narrow the chart to what you want, then generate that. Start small on a new site and read the output before scaling up.', 'image-size-manager' ); ?>
+					</span>
+				</p>
+
+				<?php $ism_gen_fields = ism_ai_get_fields(); ?>
+				<div class="ism-seo-genfields">
+					<span class="ism-seo-genfields-label"><?php esc_html_e( 'Generate which fields:', 'image-size-manager' ); ?></span>
+					<?php foreach ( ism_ai_fields() as $ism_field_key => $ism_field_label ) : ?>
+						<label class="ism-seo-genfield-toggle">
+							<input
+								type="checkbox"
+								class="ism-seo-genfield"
+								value="<?php echo esc_attr( $ism_field_key ); ?>"
+								<?php checked( in_array( $ism_field_key, $ism_gen_fields, true ) ); ?> />
+							<?php echo esc_html( $ism_field_label ); ?>
+						</label>
+					<?php endforeach; ?>
+					<p class="description ism-seo-genfields-note">
+						<?php esc_html_e( 'Unticked fields are not requested from the model at all, so they cost nothing and are left untouched on the image. Description is off by default — it is the attachment\'s post_content, which most themes never render on the front end.', 'image-size-manager' ); ?>
+					</p>
+					<p class="description ism-seo-genfields-warn" style="display:none"></p>
+
+					<?php
+					$ism_lengths  = ism_ai_get_lengths();
+					$ism_ceilings = ism_ai_length_ceilings();
+					?>
+					<table class="ism-seo-lengths" role="presentation">
+						<thead>
+							<tr>
+								<th scope="col"><?php esc_html_e( 'Length, in characters', 'image-size-manager' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Min', 'image-size-manager' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Max', 'image-size-manager' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+						<?php foreach ( ism_ai_fields() as $ism_field_key => $ism_field_label ) : ?>
+							<tr class="ism-seo-length-row<?php echo in_array( $ism_field_key, $ism_gen_fields, true ) ? '' : ' ism-seo-length-off'; ?>"
+								data-field="<?php echo esc_attr( $ism_field_key ); ?>">
+								<th scope="row"><?php echo esc_html( $ism_field_label ); ?></th>
+								<?php foreach ( [ 'min', 'max' ] as $ism_bound ) : ?>
+									<td>
+										<input
+											type="number"
+											class="small-text ism-seo-len"
+											data-field="<?php echo esc_attr( $ism_field_key ); ?>"
+											data-bound="<?php echo esc_attr( $ism_bound ); ?>"
+											min="0"
+											max="<?php echo esc_attr( (string) $ism_ceilings[ $ism_field_key ] ); ?>"
+											step="1"
+											aria-label="<?php echo esc_attr( sprintf( '%s %s characters', $ism_field_label, $ism_bound === 'min' ? 'minimum' : 'maximum' ) ); ?>"
+											value="<?php echo esc_attr( (string) $ism_lengths[ $ism_field_key ][ $ism_bound ] ); ?>" />
+									</td>
+								<?php endforeach; ?>
+							</tr>
+						<?php endforeach; ?>
+						</tbody>
+					</table>
+					<p class="description">
+						<?php esc_html_e( '0 means no limit. Counted in characters, spaces included. The model is given the range, and every result is measured: a field that misses gets one automatic rewrite, which costs roughly one more request for that image. Anything still outside the range is flagged in review and never cut off. 125 for alt text is a common guideline, not a screen-reader limit.', 'image-size-manager' ); ?>
+					</p>
+					<p class="description ism-seo-lengths-warn" role="alert" style="display:none"></p>
+				</div>
+
+				<div class="ism-seo-estimate" id="ism-seo-estimate"></div>
+
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-seo-generate-start" <?php disabled( ! $ism_has_key ); ?>>
+						<?php esc_html_e( 'Generate', 'image-size-manager' ); ?>
+					</button>
+					<button type="button" class="button" id="ism-seo-generate-cancel" style="display:none">
+						<?php esc_html_e( 'Stop', 'image-size-manager' ); ?>
+					</button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-seo-generate-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-seo-generate-bar"></div></div>
+					<p class="ism-progress-status" id="ism-seo-generate-status"></p>
+					<ul class="ism-regen-log" id="ism-seo-generate-log" style="display:none"></ul>
+				</div>
+			</div>
+
+			<!-- Review ──────────────────────────────────────────────────── -->
+			<div class="ism-card" id="ism-seo-review-card" style="margin-top:18px; display:none">
+				<h4><?php esc_html_e( 'Step 4 — Review and apply', 'image-size-manager' ); ?></h4>
+				<p class="description">
+					<?php esc_html_e( 'Every field is editable. Nothing is written until you press Apply, and only checked rows are written. An empty field is left unchanged rather than cleared.', 'image-size-manager' ); ?>
+				</p>
+
+				<div class="ism-seo-review-toolbar">
+					<button type="button" class="button" id="ism-seo-select-all"><?php esc_html_e( 'Select all with changes', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-select-none"><?php esc_html_e( 'Deselect all', 'image-size-manager' ); ?></button>
+					<button type="button" class="button button-primary" id="ism-seo-apply"><?php esc_html_e( 'Apply selected', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-seo-discard"><?php esc_html_e( 'Discard proposals', 'image-size-manager' ); ?></button>
+					<span class="ism-seo-apply-status"></span>
+				</div>
+
+				<div id="ism-seo-review-list"></div>
+			</div>
+
+
+		</div><!-- /ism-panel-seo -->
+
+		<!-- ═══════════════════════════════════════════════════════════════════
+		     PANEL – BROKEN IMAGES
+		     ══════════════════════════════════════════════════════════════════ -->
+		<div id="ism-panel-broken" class="ism-panel" hidden>
+
+			<div class="ism-card">
+				<h2><?php esc_html_e( 'Broken Images', 'image-size-manager' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'References that point at an image which is no longer there. Two kinds: a reference to an attachment that has been deleted, and a reference to a file that is missing from disk. WordPress reports neither — the page just renders a gap.', 'image-size-manager' ); ?>
+				</p>
+				<p class="ism-broken-scope ism-broken-triage">
+					<strong><?php esc_html_e( 'Not every broken reference is a broken image.', 'image-size-manager' ); ?></strong>
+					<?php esc_html_e( 'Pages render the image URL, not the attachment ID, so a deleted attachment whose file is still on disk looks perfectly fine. References on saved templates may never render, and *_tablet or *_mobile variants only appear at those breakpoints. Each row is rated on that basis — and because the rating is a guess, every row has an "Is it actually broken?" button that loads the live page and tells you whether the file is really requested.', 'image-size-manager' ); ?>
+				</p>
+				<p class="ism-broken-scope">
+					<?php esc_html_e( 'This tab finds broken references and suggests replacements. It does not repair anything yet — repointing has to rewrite Elementor JSON and ACF fields correctly, and that is being built and tested separately. Picking a replacement here records the decision so the repair step can use it later.', 'image-size-manager' ); ?>
+				</p>
+			</div>
+
+			<div class="ism-card ism-bulk-card" style="margin-top:18px">
+				<p class="description ism-broken-state"></p>
+				<div class="ism-regen-controls">
+					<button type="button" class="button button-primary" id="ism-broken-scan"><?php esc_html_e( 'Scan for broken images', 'image-size-manager' ); ?></button>
+					<button type="button" class="button" id="ism-broken-rescan"><?php esc_html_e( 'Rescan', 'image-size-manager' ); ?></button>
+				</div>
+				<div class="ism-progress-wrap" id="ism-broken-progress" style="display:none">
+					<div class="ism-progress-bar-track"><div class="ism-progress-bar-fill" id="ism-broken-bar"></div></div>
+					<p class="ism-progress-status" id="ism-broken-status"></p>
+				</div>
+				<div class="ism-broken-summary" style="display:none"></div>
+			</div>
+
+			<div class="ism-card" id="ism-broken-list-card" style="margin-top:18px; display:none">
+				<div class="ism-seo-chart-toolbar">
+					<label>
+						<?php esc_html_e( 'Show', 'image-size-manager' ); ?>
+						<select id="ism-broken-filter">
+							<option value="visible"><?php esc_html_e( 'Probably visible to visitors', 'image-size-manager' ); ?></option>
+							<option value="harmless"><?php esc_html_e( 'Probably harmless leftovers', 'image-size-manager' ); ?></option>
+							<option value="all"><?php esc_html_e( 'Everything', 'image-size-manager' ); ?></option>
+							<option value="stale_id"><?php esc_html_e( 'Deleted attachment', 'image-size-manager' ); ?></option>
+							<option value="missing_file"><?php esc_html_e( 'File missing from disk', 'image-size-manager' ); ?></option>
+							<option value="recoverable"><?php esc_html_e( 'Filename recoverable', 'image-size-manager' ); ?></option>
+							<option value="unrecoverable"><?php esc_html_e( 'No filename — needs manual pick', 'image-size-manager' ); ?></option>
+							<option value="chosen"><?php esc_html_e( 'Replacement chosen', 'image-size-manager' ); ?></option>
+						</select>
+					</label>
+					<input type="search" id="ism-broken-search" class="regular-text" placeholder="<?php esc_attr_e( 'Filter by filename, page or field…', 'image-size-manager' ); ?>" />
+					<span class="ism-broken-count"></span>
+				</div>
+
+				<div class="ism-seo-pager ism-broken-pager-top"></div>
+				<div id="ism-broken-list"></div>
+				<div class="ism-seo-pager ism-broken-pager-bottom"></div>
+			</div>
+
+		</div><!-- /ism-panel-broken -->
+
+		<!-- ═══════════════════════════════════════════════════════════════════
 		     PANEL 5 – ADVANCED (BULK TOOLS)
 		     ══════════════════════════════════════════════════════════════════ -->
 		<div id="ism-panel-advanced" class="ism-panel" hidden>
@@ -542,14 +1049,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 			<div class="ism-card ism-bulk-card" style="margin-top:18px">
 				<h4><?php esc_html_e( 'Remove WordPress -scaled Images', 'image-size-manager' ); ?></h4>
 				<p class="description">
-					<?php esc_html_e( 'WordPress automatically creates a -scaled version of any image larger than 2560px. This tool deletes those -scaled files from disk and repoints the media library to the original file.', 'image-size-manager' ); ?>
+					<?php esc_html_e( 'WordPress automatically creates a -scaled version of any image larger than 2560px. This tool deletes those -scaled files from disk, repoints the media library to the original file, and rewrites any page, template or custom field that already pointed at the -scaled version so nothing is left referencing a deleted file.', 'image-size-manager' ); ?>
 				</p>
 
 				<?php if ( $below_threshold ) : ?>
 				<p class="description" style="color:#1d7e2d; margin-top:6px; font-weight:500">
 					<?php
 					printf(
-						esc_html__( '✓ WordPress -scaled images are disabled. Your Max Upload size (%dpx) is below WordPress\'s 2560px threshold, so -scaled files will never be created on new uploads — it is safe to remove any existing ones.', 'image-size-manager' ),
+						esc_html__( '✓ WordPress -scaled images are disabled. Your Max Upload size (%dpx) is below WordPress\'s 2560px threshold, so no new -scaled files will be created. Existing pages that already reference a -scaled file are rewritten to follow it.', 'image-size-manager' ),
 						esc_html( $scaling_limit )
 					);
 					?>
